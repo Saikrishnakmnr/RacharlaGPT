@@ -35,7 +35,7 @@ if st.sidebar.button("Clear Chat History"):
 
 # Initialize models with fallback protection
 primary_llm = ChatGroq(model_name="groq/compound", temperature=0.7)
-backup_llm = ChatGroq(model_name="qwen/qwen3.8-27b", temperature=0.7)
+backup_llm = ChatGroq(model_name="qwen/qwen3-32b", temperature=0.7)
 llm = primary_llm.with_fallbacks([backup_llm])
 
 # Chat History setup

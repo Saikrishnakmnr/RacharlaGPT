@@ -2,11 +2,11 @@ import os
 import streamlit as st
 from llm_chain import get_groq_response
 
-# 1. Page Config
+# 1. Page Configuration
 st.set_page_config(page_title="RacharlaGPT", page_icon="🤖")
 st.title("RacharlaGPT")
 
-# 2. Secret Check
+# 2. Secret Verification
 if "GROQ_API_KEY" in st.secrets:
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 else:
@@ -17,38 +17,36 @@ else:
 st.sidebar.header("Configuration")
 system_prompt = st.sidebar.text_area(
     "System Prompt (AI Persona):",
-    value="You are a helpful, witty, and concise AI assistant powered by Groq."
+    value="You are a helpful, witty, and concise AI assistant."
 )
 
-# 4. New Chat Reset Button
+# Reset Button to wipe memory
 if st.sidebar.button("➕ New Chat", use_container_width=True):
     st.session_state.messages = []
     st.rerun()
 
-# 5. Session State Memory Setup
+# 4. Session State Memory
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 6. Render visible chat UI history
+# 5. Render visible chat log
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 7. Prompt Execution Engine
+# 6. User Prompt Logic
 if prompt := st.chat_input("Type your message..."):
-    # Append & display user prompt
+    # Append user prompt
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # CRITICAL FIX: Slice session memory directly HERE in app.py
-    # Send ONLY the last 2 items (current user prompt + 1 prior assistant response)
-    payload_to_send = st.session_state.messages[-2:]
-
+    # Generate assistant output
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
-                response = get_groq_response(payload_to_send, system_prompt)
+                # Send sanitized copy of memory
+                response = get_groq_response(st.session_state.messages, system_prompt)
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
             except Exception as e:

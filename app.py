@@ -1,9 +1,9 @@
 import os
 import streamlit as st
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 
-# 1. Streamlit Page Config
+# 1. Page Config
 st.set_page_config(page_title="RacharlaGPT", page_icon="🤖")
 st.title("RacharlaGPT")
 
@@ -37,12 +37,12 @@ for message in st.session_state.messages:
 
 # 6. User Prompt Execution Logic
 if prompt := st.chat_input("Type your message..."):
-    # Append and display user message
+    # Append and display user message locally on screen
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Generate assistant response using direct LLM chain
+    # Generate assistant response
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
@@ -51,22 +51,18 @@ if prompt := st.chat_input("Type your message..."):
                 backup_llm = ChatGroq(model_name="qwen/qwen3-32b", temperature=0.7)
                 llm = primary_llm.with_fallbacks([backup_llm])
 
-                # Slice payload to last 4 messages to prevent token overflow
-                recent_messages = st.session_state.messages[-4:]
-
-                # Format payload
-                formatted_messages = [SystemMessage(content=system_prompt)]
-                for m in recent_messages:
-                    if m["role"] == "user":
-                        formatted_messages.append(HumanMessage(content=m["content"]))
-                    elif m["role"] == "assistant":
-                        formatted_messages.append(AIMessage(content=m["content"]))
+                # CRITICAL FIX: Send ONLY SystemMessage + current HumanMessage
+                # Omitting AIMessage prevents groq/compound's hidden reasoning payload from crashing the API
+                formatted_messages = [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=prompt)
+                ]
 
                 # Invoke LLM
                 response = llm.invoke(formatted_messages).content
                 st.markdown(response)
 
-                # Store response in session state
+                # Store response in session state for visual screen history
                 st.session_state.messages.append({"role": "assistant", "content": response})
 
             except Exception as e:

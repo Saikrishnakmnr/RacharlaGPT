@@ -1,4 +1,4 @@
-```python
+
 import os
 import uuid
 from datetime import datetime
@@ -661,4 +661,3 @@ if user_input:
 
     # Refresh sidebar so the new chat title appears immediately
     st.rerun()
-```

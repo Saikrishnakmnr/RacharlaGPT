@@ -1,69 +1,73 @@
 import os
 import streamlit as st
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
 
-# 1. Page Config
-st.set_page_config(page_title="RacharlaGPT", page_icon="🤖")
-st.title("RacharlaGPT")
+st.set_page_config(page_title="⚡ Groq AI Assistant", page_icon="⚡", layout="wide")
+st.title("⚡ Groq AI Assistant")
 
-# 2. Secret Verification
-if "GROQ_API_KEY" in st.secrets:
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-else:
-    st.error("GROQ_API_KEY missing from Streamlit secrets!")
+# Fetch key safely from secrets or environment
+api_key = os.environ.get("GROQ_API_KEY")
+
+if not api_key:
+    try:
+        api_key = st.secrets["GROQ_API_KEY"]
+    except Exception:
+        api_key = None
+
+if not api_key:
+    st.error("GROQ_API_KEY not found! Please set it in .streamlit/secrets.toml")
     st.stop()
 
-# 3. Sidebar UI Configuration
+os.environ["GROQ_API_KEY"] = api_key
+
+# Sidebar setup
 st.sidebar.header("Configuration")
 system_prompt = st.sidebar.text_area(
-    "System Prompt (AI Persona):",
+    "System Prompt (AI Persona):", 
     value="You are a helpful, witty, and concise AI assistant powered by Groq."
 )
 
-# New Chat button to reset conversational memory
-if st.sidebar.button("➕ New Chat", use_container_width=True):
+if st.sidebar.button("Clear Chat History"):
     st.session_state.messages = []
     st.rerun()
 
-# 4. Initialize Session Memory State
+# Initialize models with fallback protection
+primary_llm = ChatGroq(model_name="groq/compound", temperature=0.7)
+backup_llm = ChatGroq(model_name="qwen/qwen3.8-27b", temperature=0.7)
+llm = primary_llm.with_fallbacks([backup_llm])
+
+# Chat History setup
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 5. Render visible chat log on UI reloads
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    role = "user" if isinstance(message, HumanMessage) else "assistant"
+    with st.chat_message(role):
+        st.write(message.content)
 
-# 6. User Prompt Execution Logic
-if prompt := st.chat_input("Type your message..."):
-    # Append and display user message locally on screen
-    st.session_state.messages.append({"role": "user", "content": prompt})
+# Chat Input
+if user_input := st.chat_input("Type your message..."):
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.write(user_input)
+    
+    st.session_state.messages.append(HumanMessage(content=user_input))
 
-    # Generate assistant response
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        MessagesPlaceholder(variable_name="history"),
+        ("human", "{input}")
+    ])
+
+    chain = prompt | llm
+
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            try:
-                # Primary and Fallback setup
-                primary_llm = ChatGroq(model_name="groq/compound", temperature=0.7)
-                backup_llm = ChatGroq(model_name="qwen/qwen3-32b", temperature=0.7)
-                llm = primary_llm.with_fallbacks([backup_llm])
+            response = chain.invoke({
+                "history": st.session_state.messages[:-1],
+                "input": user_input
+            })
+            st.write(response.content)
 
-                # CRITICAL FIX: Send ONLY SystemMessage + current HumanMessage
-                # Omitting AIMessage prevents groq/compound's hidden reasoning payload from crashing the API
-                formatted_messages = [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=prompt)
-                ]
-
-                # Invoke LLM
-                response = llm.invoke(formatted_messages).content
-                st.markdown(response)
-
-                # Store response in session state for visual screen history
-                st.session_state.messages.append({"role": "assistant", "content": response})
-
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+    st.session_state.messages.append(AIMessage(content=response.content))

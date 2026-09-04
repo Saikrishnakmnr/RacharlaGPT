@@ -1,73 +1,51 @@
 import os
 import streamlit as st
-from langchain_groq import ChatGroq
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage
+from llm_chain import get_groq_response
 
-st.set_page_config(page_title="⚡ Groq AI Assistant", page_icon="⚡", layout="wide")
-st.title("⚡ Groq AI Assistant")
+# Streamlit Page Setup
+st.set_page_config(page_title="RacharlaGPT", page_icon="🤖")
+st.title("RacharlaGPT")
 
-# Fetch key safely from secrets or environment
-api_key = os.environ.get("GROQ_API_KEY")
-
-if not api_key:
-    try:
-        api_key = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        api_key = None
-
-if not api_key:
-    st.error("GROQ_API_KEY not found! Please set it in .streamlit/secrets.toml")
+# API Key Validation from Streamlit Secrets
+if "GROQ_API_KEY" in st.secrets:
+    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+else:
+    st.error("GROQ_API_KEY missing from Streamlit secrets!")
     st.stop()
 
-os.environ["GROQ_API_KEY"] = api_key
-
-# Sidebar setup
+# Sidebar Configuration
 st.sidebar.header("Configuration")
 system_prompt = st.sidebar.text_area(
-    "System Prompt (AI Persona):", 
+    "System Prompt (AI Persona):",
     value="You are a helpful, witty, and concise AI assistant powered by Groq."
 )
 
-if st.sidebar.button("Clear Chat History"):
+# New Chat button to reset conversation state
+if st.sidebar.button("➕ New Chat", use_container_width=True):
     st.session_state.messages = []
     st.rerun()
 
-# Initialize models with fallback protection
-primary_llm = ChatGroq(model_name="groq/compound", temperature=0.7)
-backup_llm = ChatGroq(model_name="qwen/qwen3-32b", temperature=0.7)
-llm = primary_llm.with_fallbacks([backup_llm])
-
-# Chat History setup
+# Initialize Chat History Session State
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Display past chat messages on screen reload
 for message in st.session_state.messages:
-    role = "user" if isinstance(message, HumanMessage) else "assistant"
-    with st.chat_message(role):
-        st.write(message.content)
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# Chat Input
-if user_input := st.chat_input("Type your message..."):
+# Capture user input
+if prompt := st.chat_input("Type your message..."):
+    # Append & display user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.write(user_input)
-    
-    st.session_state.messages.append(HumanMessage(content=user_input))
+        st.markdown(prompt)
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        MessagesPlaceholder(variable_name="history"),
-        ("human", "{input}")
-    ])
-
-    chain = prompt | llm
-
+    # Generate and display assistant response using llm_chain.py
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response = chain.invoke({
-                "history": st.session_state.messages[:-1],
-                "input": user_input
-            })
-            st.write(response.content)
+            response = get_groq_response(st.session_state.messages)
+            st.markdown(response)
 
-    st.session_state.messages.append(AIMessage(content=response.content))
+    # Append assistant response to session state
+    st.session_state.messages.append({"role": "assistant", "content": response})

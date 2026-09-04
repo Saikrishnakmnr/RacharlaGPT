@@ -1,93 +1,223 @@
-
 import os
 import uuid
 from datetime import datetime
 
 import streamlit as st
-
 from groq import RateLimitError
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# RACHARLAGPT — ChatGPT-style Groq assistant
 # ============================================================
 
 st.set_page_config(
-    page_title="⚡ Groq AI Assistant",
+    page_title="RacharlaGPT",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+# -----------------------------
+# App configuration
+# -----------------------------
+PRIMARY_MODEL = "openai/gpt-oss-20b"
+BACKUP_MODEL = "llama-3.1-8b-instant"
+
+DEFAULT_SYSTEM_PROMPT = """You are RacharlaGPT, a helpful, intelligent, friendly and concise AI assistant.
+Give accurate, clear and useful answers.
+Use headings, bullet points, numbered steps and tables when they improve readability.
+If the user asks for code, provide complete working code and explain important changes briefly.
+Do not invent facts. If you are uncertain, say so.
+Be practical and solution-oriented."""
+
+# Keep the complete conversation visible in the UI, but only send recent
+# messages to the model. This helps control token usage.
+MAX_CONTEXT_MESSAGES = 14
+
 
 # ============================================================
-# CUSTOM CSS
+# Secrets / API key
 # ============================================================
+def get_api_key():
+    key = os.environ.get("GROQ_API_KEY")
 
+    if not key:
+        try:
+            key = st.secrets.get("GROQ_API_KEY")
+        except Exception:
+            key = None
+
+    return key
+
+
+api_key = get_api_key()
+
+if not api_key:
+    st.error("GROQ_API_KEY is not configured.")
+    st.info(
+        "For Streamlit Cloud: open your app → Settings → Secrets and add "
+        'GROQ_API_KEY = "your_groq_api_key_here"'
+    )
+    st.stop()
+
+os.environ["GROQ_API_KEY"] = api_key
+
+
+# ============================================================
+# Styling
+# ============================================================
 st.markdown(
     """
     <style>
+        /* ---------- Global ---------- */
+        .stApp {
+            background: #ffffff;
+        }
 
-    /* Main page */
-    .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 6rem;
-        max-width: 1200px;
-    }
+        /* ---------- Header ---------- */
+        .app-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 6px 0 4px 0;
+        }
 
-    /* Sidebar */
-    section[data-testid="stSidebar"] {
-        min-width: 280px;
-        max-width: 320px;
-    }
+        .brand-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 23px;
+            background: linear-gradient(135deg, #ff4b4b, #ff9f1c);
+            box-shadow: 0 8px 24px rgba(255, 75, 75, 0.20);
+        }
 
-    /* Chat title */
-    .app-title {
-        text-align: center;
-        font-size: 2rem;
-        font-weight: 700;
-        margin-bottom: 0.2rem;
-    }
+        .brand-name {
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #172033;
+        }
 
-    .app-subtitle {
-        text-align: center;
-        color: #888;
-        margin-bottom: 2rem;
-    }
+        .brand-subtitle {
+            color: #6b7280;
+            margin: 0 0 24px 55px;
+            font-size: 14px;
+        }
 
-    /* Chat history buttons */
-    .chat-history-title {
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: #888;
-        margin-top: 1rem;
-        margin-bottom: 0.5rem;
-    }
+        /* ---------- Sidebar ---------- */
+        section[data-testid="stSidebar"] {
+            background: #f7f8fc;
+            border-right: 1px solid #e7e9ef;
+        }
 
-    /* Welcome screen */
-    .welcome-box {
-        text-align: center;
-        padding: 4rem 1rem 2rem 1rem;
-    }
+        section[data-testid="stSidebar"] .block-container {
+            padding-top: 1.25rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
 
-    .welcome-box h2 {
-        font-size: 2rem;
-    }
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-size: 22px;
+            font-weight: 800;
+            color: #172033;
+            margin-bottom: 14px;
+        }
 
-    .welcome-box p {
-        color: #888;
-        font-size: 1rem;
-    }
+        .sidebar-badge {
+            font-size: 20px;
+        }
 
-    /* Small status text */
-    .small-text {
-        color: #888;
-        font-size: 0.8rem;
-    }
+        .history-label {
+            margin-top: 22px;
+            margin-bottom: 8px;
+            color: #8a8f9d;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: .8px;
+        }
 
+        .empty-history {
+            color: #8a8f9d;
+            font-size: 13px;
+            padding: 12px 6px;
+        }
+
+        /* Make chat-history buttons look like clean list items. */
+        div[data-testid="stSidebar"] button {
+            border-radius: 11px !important;
+        }
+
+        /* ---------- Chat area ---------- */
+        .welcome-card {
+            max-width: 760px;
+            margin: 10vh auto 3vh auto;
+            text-align: center;
+            padding: 36px 24px;
+        }
+
+        .welcome-logo {
+            font-size: 48px;
+            margin-bottom: 8px;
+        }
+
+        .welcome-title {
+            font-size: 34px;
+            font-weight: 800;
+            color: #172033;
+            letter-spacing: -1px;
+        }
+
+        .welcome-text {
+            color: #6b7280;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        .suggestion {
+            border: 1px solid #e7e9ef;
+            border-radius: 14px;
+            padding: 14px 16px;
+            background: #fbfcff;
+            margin: 8px 0;
+            text-align: left;
+            color: #3f4654;
+        }
+
+        .chat-footer-note {
+            text-align: center;
+            color: #9aa0ad;
+            font-size: 11px;
+            margin-top: 12px;
+        }
+
+        /* ---------- Status card ---------- */
+        .status-card {
+            border: 1px solid #e7e9ef;
+            border-radius: 13px;
+            padding: 10px 12px;
+            background: white;
+            font-size: 12px;
+            color: #596170;
+        }
+
+        /* ---------- Mobile ---------- */
+        @media (max-width: 700px) {
+            .brand-name {
+                font-size: 25px;
+            }
+
+            .welcome-title {
+                font-size: 27px;
+            }
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -95,569 +225,429 @@ st.markdown(
 
 
 # ============================================================
-# API KEY
+# Session state
 # ============================================================
+def new_chat_data():
+    return {
+        "title": "New Chat",
+        "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "updated": datetime.now().timestamp(),
+        "messages": [],
+    }
 
-api_key = os.environ.get("GROQ_API_KEY")
-
-if not api_key:
-    try:
-        api_key = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        api_key = None
-
-if not api_key:
-    st.error(
-        "🔐 GROQ_API_KEY was not found.\n\n"
-        "Add it to your Streamlit secrets:\n\n"
-        "`GROQ_API_KEY = \"your_api_key_here\"`"
-    )
-    st.stop()
-
-
-# ============================================================
-# CONSTANTS
-# ============================================================
-
-# Number of recent messages sent to the model.
-#
-# IMPORTANT:
-# We keep ALL messages in the UI/chat history,
-# but only send recent messages to Groq.
-#
-# This prevents long conversations from consuming
-# excessive tokens.
-MAX_CONTEXT_MESSAGES = 12
-
-PRIMARY_MODEL = "openai/gpt-oss-20b"
-BACKUP_MODEL = "qwen/qwen3.8-27b"
-
-DEFAULT_SYSTEM_PROMPT = (
-    "You are a helpful, intelligent, friendly and concise AI assistant. "
-    "Give accurate, clear and useful answers. "
-    "Use headings, bullet points and examples when they improve readability. "
-    "If you are unsure about something, say so instead of inventing facts."
-)
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
 
 if "chats" not in st.session_state:
-    st.session_state.chats = {}
+    first_id = str(uuid.uuid4())
+    st.session_state.chats = {first_id: new_chat_data()}
+    st.session_state.current_chat_id = first_id
 
 if "current_chat_id" not in st.session_state:
-    st.session_state.current_chat_id = None
+    st.session_state.current_chat_id = next(iter(st.session_state.chats))
 
 if "system_prompt" not in st.session_state:
     st.session_state.system_prompt = DEFAULT_SYSTEM_PROMPT
 
+if "search_history" not in st.session_state:
+    st.session_state.search_history = ""
+
+if "busy" not in st.session_state:
+    st.session_state.busy = False
+
 
 # ============================================================
-# CHAT MANAGEMENT FUNCTIONS
+# Chat helpers
 # ============================================================
-
 def create_chat():
-    """
-    Create a new empty conversation.
-    """
     chat_id = str(uuid.uuid4())
-
-    st.session_state.chats[chat_id] = {
-        "title": "New Chat",
-        "messages": [],
-        "created_at": datetime.now().isoformat(),
-    }
-
+    st.session_state.chats[chat_id] = new_chat_data()
     st.session_state.current_chat_id = chat_id
 
 
 def delete_chat(chat_id):
-    """
-    Delete one conversation.
-    """
-
     if chat_id in st.session_state.chats:
         del st.session_state.chats[chat_id]
 
-    # If the deleted chat was active,
-    # automatically open another chat.
+    if not st.session_state.chats:
+        create_chat()
+        return
+
     if st.session_state.current_chat_id == chat_id:
-
-        if st.session_state.chats:
-            # Open the newest remaining chat
-            remaining = sorted(
-                st.session_state.chats.items(),
-                key=lambda item: item[1]["created_at"],
-                reverse=True,
-            )
-
-            st.session_state.current_chat_id = remaining[0][0]
-
-        else:
-            create_chat()
+        # Open the most recently updated remaining chat.
+        remaining = sorted(
+            st.session_state.chats.items(),
+            key=lambda item: item[1]["updated"],
+            reverse=True,
+        )
+        st.session_state.current_chat_id = remaining[0][0]
 
 
 def delete_all_chats():
-    """
-    Delete every conversation and start a fresh chat.
-    """
-    st.session_state.chats = {}
-    create_chat()
+    first_id = str(uuid.uuid4())
+    st.session_state.chats = {first_id: new_chat_data()}
+    st.session_state.current_chat_id = first_id
 
 
-def get_current_chat():
-    """
-    Return the currently selected chat.
-    """
-
+def current_chat():
     chat_id = st.session_state.current_chat_id
-
-    if chat_id is None:
-        create_chat()
-        chat_id = st.session_state.current_chat_id
 
     if chat_id not in st.session_state.chats:
         create_chat()
-        chat_id = st.session_state.current_chat_id
 
-    return st.session_state.chats[chat_id]
+    return st.session_state.chats[st.session_state.current_chat_id]
 
 
-def generate_chat_title(user_message):
-    """
-    Generate a simple title from the first user question.
-    """
+def make_title(text):
+    cleaned = " ".join(text.strip().split())
 
-    title = " ".join(user_message.strip().split())
-
-    if not title:
+    if not cleaned:
         return "New Chat"
 
-    # Keep sidebar titles short
-    if len(title) > 42:
-        title = title[:42].rstrip() + "..."
+    # Keep sidebar titles compact.
+    if len(cleaned) <= 34:
+        return cleaned
 
-    return title
+    return cleaned[:34].rstrip() + "…"
+
+
+def chat_matches(chat, query):
+    if not query:
+        return True
+
+    q = query.lower()
+
+    if q in chat["title"].lower():
+        return True
+
+    for message in chat["messages"]:
+        if q in message["content"].lower():
+            return True
+
+    return False
+
+
+def build_model_messages(chat):
+    recent = chat["messages"][-MAX_CONTEXT_MESSAGES:]
+
+    messages = [SystemMessage(content=st.session_state.system_prompt)]
+
+    for message in recent:
+        if message["role"] == "user":
+            messages.append(HumanMessage(content=message["content"]))
+        elif message["role"] == "assistant":
+            messages.append(AIMessage(content=message["content"]))
+
+    return messages
 
 
 # ============================================================
-# INITIAL CHAT
+# Model setup
 # ============================================================
+@st.cache_resource(show_spinner=False)
+def load_models(key):
+    primary = ChatGroq(
+        model=PRIMARY_MODEL,
+        temperature=0.7,
+        api_key=key,
+    )
 
-if not st.session_state.chats:
-    create_chat()
+    backup = ChatGroq(
+        model=BACKUP_MODEL,
+        temperature=0.7,
+        api_key=key,
+    )
+
+    return primary, backup
 
 
-current_chat = get_current_chat()
+primary_llm, backup_llm = load_models(api_key)
+
+
+def ask_model(chat):
+    messages = build_model_messages(chat)
+
+    # Primary model first.
+    try:
+        return primary_llm.invoke(messages), "primary"
+
+    except RateLimitError:
+        # If the primary is temporarily rate-limited, try the lighter
+        # backup model.
+        try:
+            return backup_llm.invoke(messages), "backup"
+
+        except RateLimitError as backup_error:
+            raise backup_error
 
 
 # ============================================================
-# SIDEBAR
+# Sidebar
 # ============================================================
-
 with st.sidebar:
+    st.markdown(
+        """
+        <div class="sidebar-brand">
+            <span class="sidebar-badge">⚡</span>
+            <span>RacharlaGPT</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("## ⚡ Groq AI")
-
-    # New Chat button
     if st.button(
-        "＋ New Chat",
+        "＋  New Chat",
         use_container_width=True,
         type="primary",
+        key="new_chat_btn",
     ):
         create_chat()
         st.rerun()
 
-    st.markdown(
-        '<div class="chat-history-title">YOUR CHATS</div>',
-        unsafe_allow_html=True,
+    st.markdown('<div class="history-label">YOUR CHATS</div>', unsafe_allow_html=True)
+
+    search = st.text_input(
+        "Search chats",
+        value=st.session_state.search_history,
+        placeholder="🔎 Search your chats...",
+        label_visibility="collapsed",
+        key="chat_search_box",
+    )
+    st.session_state.search_history = search
+
+    chats_sorted = sorted(
+        st.session_state.chats.items(),
+        key=lambda item: item[1]["updated"],
+        reverse=True,
     )
 
-    # --------------------------------------------------------
-    # CHAT HISTORY
-    # --------------------------------------------------------
+    visible_chats = [
+        (chat_id, chat)
+        for chat_id, chat in chats_sorted
+        if chat_matches(chat, search)
+    ]
 
-    if st.session_state.chats:
-
-        # Newest conversations first
-        sorted_chats = sorted(
-            st.session_state.chats.items(),
-            key=lambda item: item[1]["created_at"],
-            reverse=True,
+    if not visible_chats:
+        st.markdown(
+            '<div class="empty-history">No chats match your search.</div>',
+            unsafe_allow_html=True,
         )
 
-        for chat_id, chat in sorted_chats:
+    for chat_id, chat in visible_chats:
+        col_chat, col_delete = st.columns([0.80, 0.20], gap="small")
 
-            col1, col2 = st.columns([5, 1])
+        is_current = chat_id == st.session_state.current_chat_id
 
-            with col1:
+        with col_chat:
+            if st.button(
+                f"💬  {chat['title']}",
+                key=f"open_{chat_id}",
+                use_container_width=True,
+                type="secondary" if not is_current else "primary",
+                help="Open this conversation",
+            ):
+                st.session_state.current_chat_id = chat_id
+                st.rerun()
 
-                # Highlight currently selected chat
-                if chat_id == st.session_state.current_chat_id:
-                    button_label = f"💬 {chat['title']}"
-                else:
-                    button_label = chat["title"]
-
-                if st.button(
-                    button_label,
-                    key=f"open_{chat_id}",
-                    use_container_width=True,
-                ):
-                    st.session_state.current_chat_id = chat_id
-                    st.rerun()
-
-            with col2:
-
-                if st.button(
-                    "🗑️",
-                    key=f"delete_{chat_id}",
-                    help="Delete this chat",
-                ):
-                    delete_chat(chat_id)
-                    st.rerun()
-
-    else:
-        st.caption("No conversations yet.")
+        with col_delete:
+            if st.button(
+                "🗑️",
+                key=f"delete_{chat_id}",
+                use_container_width=True,
+                help=f"Delete '{chat['title']}'",
+            ):
+                delete_chat(chat_id)
+                st.rerun()
 
     st.divider()
 
-    # --------------------------------------------------------
-    # DELETE ALL
-    # --------------------------------------------------------
-
     if st.button(
-        "🗑️ Delete All Chats",
+        "🗑️  Delete All Chats",
         use_container_width=True,
+        key="delete_all_btn",
     ):
         delete_all_chats()
         st.rerun()
 
     st.divider()
 
-    # --------------------------------------------------------
-    # CONFIGURATION
-    # --------------------------------------------------------
-
     st.markdown("### ⚙️ Configuration")
 
     st.session_state.system_prompt = st.text_area(
         "AI System Prompt",
         value=st.session_state.system_prompt,
-        height=150,
-        help="Controls the personality and behavior of the AI.",
+        height=155,
+        help="Controls the assistant's personality and response style.",
     )
 
-    st.caption(f"Primary model: `{PRIMARY_MODEL}`")
-    st.caption(f"Fallback model: `{BACKUP_MODEL}`")
-
-    st.divider()
-
     st.markdown(
-        """
-        <div class="small-text">
-        ⚡ Powered by Groq<br>
-        💬 Chat history is maintained for this session<br>
-        🔒 API key is stored in Streamlit Secrets
+        f"""
+        <div class="status-card">
+            <b>Model</b><br>
+            {PRIMARY_MODEL}<br><br>
+            <b>Fallback</b><br>
+            {BACKUP_MODEL}
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    st.caption(
+        "Your visible chat history stays in this browser session. "
+        "For permanent multi-device history, connect a database such as Supabase later."
+    )
+
 
 # ============================================================
-# MAIN HEADER
+# Main header
 # ============================================================
-
 st.markdown(
-    '<div class="app-title">⚡ Groq AI Assistant</div>',
+    """
+    <div class="app-brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-name">RacharlaGPT</div>
+    </div>
+    <div class="brand-subtitle">Fast, intelligent AI conversations powered by Groq</div>
+    """,
     unsafe_allow_html=True,
 )
 
-st.markdown(
-    '<div class="app-subtitle">Fast, intelligent AI conversations</div>',
-    unsafe_allow_html=True,
-)
-
 
 # ============================================================
-# DISPLAY CURRENT CHAT
+# Current conversation
 # ============================================================
+chat = current_chat()
 
-current_chat = get_current_chat()
-
-for message in current_chat["messages"]:
-
-    role = message["role"]
-    content = message["content"]
-
-    with st.chat_message(role):
-        st.markdown(content)
-
-
-# ============================================================
-# WELCOME SCREEN
-# ============================================================
-
-if not current_chat["messages"]:
-
+if not chat["messages"]:
     st.markdown(
         """
-        <div class="welcome-box">
-            <h2>How can I help you today?</h2>
-            <p>
-                Ask me anything about AI, LLMs, Python,
-                programming, mathematics, science, or general topics.
-            </p>
+        <div class="welcome-card">
+            <div class="welcome-logo">⚡</div>
+            <div class="welcome-title">Welcome to RacharlaGPT</div>
+            <div class="welcome-text">
+                Ask questions, write code, brainstorm ideas, learn something new,
+                or simply have a conversation.
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    suggestion_cols = st.columns(3)
 
-# ============================================================
-# CREATE GROQ MODELS
-# ============================================================
-
-@st.cache_resource
-def get_models(api_key):
-
-    primary = ChatGroq(
-        model=PRIMARY_MODEL,
-        temperature=0.7,
-        max_tokens=2048,
-        groq_api_key=api_key,
-    )
-
-    backup = ChatGroq(
-        model=BACKUP_MODEL,
-        temperature=0.7,
-        max_tokens=2048,
-        groq_api_key=api_key,
-    )
-
-    return primary, backup
-
-
-primary_llm, backup_llm = get_models(api_key)
-
-
-# ============================================================
-# PROMPT
-# ============================================================
-
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", "{system_prompt}"),
-        MessagesPlaceholder(variable_name="history"),
-        ("human", "{input}"),
+    suggestions = [
+        ("💡 Learn", "Explain a difficult topic simply"),
+        ("💻 Code", "Build a Streamlit application"),
+        ("🚀 Create", "Give me a creative project idea"),
     ]
-)
+
+    for col, (heading, prompt_text) in zip(suggestion_cols, suggestions):
+        with col:
+            st.markdown(
+                f"""
+                <div class="suggestion">
+                    <b>{heading}</b><br>
+                    <span>{prompt_text}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+# Render complete visible history.
+for message in chat["messages"]:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 
 # ============================================================
-# CHAT INPUT
+# Chat input
 # ============================================================
-
 user_input = st.chat_input(
-    "Message Groq AI..."
+    "Message RacharlaGPT...",
+    disabled=st.session_state.busy,
 )
-
 
 if user_input:
-
     user_input = user_input.strip()
 
-    if not user_input:
-        st.stop()
+    if user_input:
+        # Save and display the user's message immediately.
+        chat["messages"].append(
+            {
+                "role": "user",
+                "content": user_input,
+            }
+        )
 
-    # --------------------------------------------------------
-    # CURRENT CHAT
-    # --------------------------------------------------------
+        chat["updated"] = datetime.now().timestamp()
 
-    current_chat = get_current_chat()
+        # Automatically name a new conversation from its first question.
+        if chat["title"] == "New Chat":
+            chat["title"] = make_title(user_input)
 
-    # --------------------------------------------------------
-    # FIRST QUESTION = CHAT TITLE
-    # --------------------------------------------------------
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-    if len(current_chat["messages"]) == 0:
-        current_chat["title"] = generate_chat_title(user_input)
-
-    # --------------------------------------------------------
-    # SAVE USER MESSAGE
-    # --------------------------------------------------------
-
-    current_chat["messages"].append(
-        {
-            "role": "user",
-            "content": user_input,
-        }
-    )
-
-    # --------------------------------------------------------
-    # DISPLAY USER MESSAGE
-    # --------------------------------------------------------
-
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    # --------------------------------------------------------
-    # PREPARE HISTORY FOR MODEL
-    # --------------------------------------------------------
-    #
-    # The UI keeps the complete conversation.
-    #
-    # But Groq receives only the last N messages.
-    #
-    # This is important for reducing token usage.
-    # --------------------------------------------------------
-
-    all_messages = current_chat["messages"]
-
-    recent_messages = all_messages[-MAX_CONTEXT_MESSAGES:]
-
-    model_history = []
-
-    # Don't send the current question twice.
-    # The current question is passed separately as {input}.
-    previous_messages = recent_messages[:-1]
-
-    for message in previous_messages:
-
-        if message["role"] == "user":
-            model_history.append(
-                HumanMessage(
-                    content=message["content"]
-                )
-            )
-
-        elif message["role"] == "assistant":
-            model_history.append(
-                AIMessage(
-                    content=message["content"]
-                )
-            )
-
-    # --------------------------------------------------------
-    # BUILD CHAIN
-    # --------------------------------------------------------
-
-    primary_chain = prompt | primary_llm
-    backup_chain = prompt | backup_llm
-
-    # --------------------------------------------------------
-    # GENERATE RESPONSE
-    # --------------------------------------------------------
-
-    response = None
-
-    with st.chat_message("assistant"):
-
-        with st.spinner("Thinking..."):
-
-            # ==================================================
-            # TRY PRIMARY MODEL
-            # ==================================================
-
+        with st.chat_message("assistant"):
             try:
-
-                response = primary_chain.invoke(
-                    {
-                        "system_prompt": st.session_state.system_prompt,
-                        "history": model_history,
-                        "input": user_input,
-                    }
-                )
-
-            # ==================================================
-            # RATE LIMIT
-            # ==================================================
-
-            except RateLimitError:
-
-                st.warning(
-                    "⚠️ The primary Groq model has reached "
-                    "its current rate limit. Trying the backup model..."
-                )
-
-                # Try backup model
-                try:
-
-                    response = backup_chain.invoke(
-                        {
-                            "system_prompt": st.session_state.system_prompt,
-                            "history": model_history,
-                            "input": user_input,
-                        }
-                    )
-
-                except RateLimitError:
-
-                    st.error(
-                        "⚠️ Both Groq models are currently rate-limited.\n\n"
-                        "Please wait a few minutes and try again."
-                    )
-
-                except Exception as backup_error:
-
-                    st.error(
-                        f"⚠️ Backup model error: {backup_error}"
-                    )
-
-            # ==================================================
-            # OTHER PRIMARY ERROR
-            # ==================================================
-
-            except Exception as primary_error:
-
-                st.warning(
-                    "⚠️ The primary model could not answer. "
-                    "Trying the backup model..."
-                )
-
-                try:
-
-                    response = backup_chain.invoke(
-                        {
-                            "system_prompt": st.session_state.system_prompt,
-                            "history": model_history,
-                            "input": user_input,
-                        }
-                    )
-
-                except RateLimitError:
-
-                    st.error(
-                        "⚠️ The backup model is also rate-limited. "
-                        "Please try again later."
-                    )
-
-                except Exception as backup_error:
-
-                    st.error(
-                        "⚠️ Both models failed.\n\n"
-                        f"Primary error: {primary_error}\n\n"
-                        f"Backup error: {backup_error}"
-                    )
-
-            # ==================================================
-            # SAVE AI RESPONSE
-            # ==================================================
-
-            if response is not None:
+                with st.spinner("RacharlaGPT is thinking…"):
+                    response, model_used = ask_model(chat)
 
                 answer = response.content
 
-                st.markdown(answer)
+                if not isinstance(answer, str):
+                    answer = str(answer)
 
-                current_chat["messages"].append(
+                # Save assistant response.
+                chat["messages"].append(
                     {
                         "role": "assistant",
                         "content": answer,
                     }
                 )
 
-    # Refresh sidebar so the new chat title appears immediately
-    st.rerun()
+                chat["updated"] = datetime.now().timestamp()
+
+                if model_used == "backup":
+                    st.caption(
+                        f"Primary model was temporarily rate-limited. "
+                        f"Answered using `{BACKUP_MODEL}`."
+                    )
+
+                st.markdown(answer)
+
+            except RateLimitError:
+                # Friendly handling instead of exposing a traceback.
+                # This is especially useful when Groq daily token limits
+                # have been exhausted.
+                friendly = (
+                    "⚠️ **Groq rate limit reached.**\n\n"
+                    "The available Groq quota for the selected models is "
+                    "temporarily exhausted. This is an API quota issue, not "
+                    "a problem with your question.\n\n"
+                    "Please wait for the quota window to reset, then try again."
+                )
+
+                st.markdown(friendly)
+
+                # Remove the unsent user message so the UI does not pretend
+                # the question received a real answer.
+                if chat["messages"] and chat["messages"][-1]["role"] == "user":
+                    chat["messages"].pop()
+
+            except Exception as exc:
+                st.error(
+                    "Something went wrong while contacting Groq. "
+                    "Please try again."
+                )
+
+                # Keep the actual error out of the normal UI, but leave
+                # enough information for debugging in the server log.
+                print(f"RacharlaGPT error: {type(exc).__name__}: {exc}")
+
+                if chat["messages"] and chat["messages"][-1]["role"] == "user":
+                    chat["messages"].pop()
+
+
+st.markdown(
+    '<div class="chat-footer-note">RacharlaGPT • Powered by Groq • AI can make mistakes, so verify important information.</div>',
+    unsafe_allow_html=True,
+)

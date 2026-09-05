@@ -20,6 +20,7 @@ APP_NAME = "RacharlaGPT"
 PRIMARY_MODEL = "openai/gpt-oss-20b"
 BACKUP_MODEL = "llama-3.1-8b-instant"
 MAX_CONTEXT_MESSAGES = 14
+MODEL_OPTIONS = ["Auto (recommended)", PRIMARY_MODEL, BACKUP_MODEL]
 
 DEFAULT_SYSTEM_PROMPT = """You are RacharlaGPT, a helpful, intelligent, friendly and concise AI assistant.
 Give accurate, clear and useful answers.
@@ -180,6 +181,10 @@ if "loaded_from_supabase" not in st.session_state:
     st.session_state.loaded_from_supabase = False
 if "search" not in st.session_state:
     st.session_state.search = ""
+if "selected_model" not in st.session_state:
+    st.session_state.selected_model = "Auto (recommended)"
+if "temperature" not in st.session_state:
+    st.session_state.temperature = 0.7
 
 
 def blank_chat():
@@ -281,10 +286,24 @@ def ask(chat):
         else:
             msgs.append(AIMessage(content=m["content"]))
 
+    selected = st.session_state.selected_model
+    if selected == PRIMARY_MODEL:
+        try:
+            llm = ChatGroq(model=PRIMARY_MODEL, temperature=st.session_state.temperature, api_key=GROQ_API_KEY)
+            return llm.invoke(msgs), "primary"
+        except RateLimitError:
+            llm = ChatGroq(model=BACKUP_MODEL, temperature=st.session_state.temperature, api_key=GROQ_API_KEY)
+            return llm.invoke(msgs), "backup"
+    if selected == BACKUP_MODEL:
+        llm = ChatGroq(model=BACKUP_MODEL, temperature=st.session_state.temperature, api_key=GROQ_API_KEY)
+        return llm.invoke(msgs), "backup"
+
     try:
-        return primary_llm.invoke(msgs), "primary"
+        llm = ChatGroq(model=PRIMARY_MODEL, temperature=st.session_state.temperature, api_key=GROQ_API_KEY)
+        return llm.invoke(msgs), "primary"
     except RateLimitError:
-        return backup_llm.invoke(msgs), "backup"
+        llm = ChatGroq(model=BACKUP_MODEL, temperature=st.session_state.temperature, api_key=GROQ_API_KEY)
+        return llm.invoke(msgs), "backup"
 
 
 if not st.session_state.loaded_from_supabase:
@@ -377,11 +396,24 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.session_state.system_prompt = st.text_area(
-        "AI System Prompt",
-        value=st.session_state.system_prompt,
-        height=150,
-    )
+    with st.expander("⚙️ AI Settings", expanded=False):
+        st.session_state.selected_model = st.selectbox(
+            "Model", MODEL_OPTIONS, index=MODEL_OPTIONS.index(st.session_state.selected_model)
+        )
+        st.session_state.temperature = st.slider(
+            "Creativity", min_value=0.0, max_value=1.2, value=float(st.session_state.temperature), step=0.1,
+            help="Lower = more focused. Higher = more creative."
+        )
+        st.session_state.system_prompt = st.text_area(
+            "AI System Prompt",
+            value=st.session_state.system_prompt,
+            height=150,
+        )
+        if st.button("↩️ Reset AI Settings", use_container_width=True):
+            st.session_state.selected_model = "Auto (recommended)"
+            st.session_state.temperature = 0.7
+            st.session_state.system_prompt = DEFAULT_SYSTEM_PROMPT
+            st.rerun()
 
     st.caption(f"Primary: {PRIMARY_MODEL}")
     st.caption(f"Fallback: {BACKUP_MODEL}")

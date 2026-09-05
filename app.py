@@ -1,18 +1,16 @@
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 import streamlit as st
 from groq import RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from supabase import create_client, Client
 
 
-# =========================================================
-# RacharlaGPT
-# Stable version
-# =========================================================
+# ============================================================
+# RACHARLAGPT — ChatGPT-style Groq assistant
+# ============================================================
 
 st.set_page_config(
     page_title="RacharlaGPT",
@@ -21,1405 +19,557 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-APP_NAME = "RacharlaGPT"
-
+# -----------------------------
+# App configuration
+# -----------------------------
 PRIMARY_MODEL = "openai/gpt-oss-20b"
 BACKUP_MODEL = "llama-3.1-8b-instant"
 
+DEFAULT_SYSTEM_PROMPT = """You are RacharlaGPT, a helpful, intelligent, friendly and concise AI assistant.
+Give accurate, clear and useful answers.
+Use headings, bullet points, numbered steps and tables when they improve readability.
+If the user asks for code, provide complete working code and explain important changes briefly.
+Do not invent facts. If you are uncertain, say so.
+Be practical and solution-oriented."""
+
+# Keep the complete conversation visible in the UI, but only send recent
+# messages to the model. This helps control token usage.
 MAX_CONTEXT_MESSAGES = 14
 
-MODEL_OPTIONS = [
-    "Auto (recommended)",
-    PRIMARY_MODEL,
-    BACKUP_MODEL,
-]
+
+# ============================================================
+# Secrets / API key
+# ============================================================
+def get_api_key():
+    key = os.environ.get("GROQ_API_KEY")
+
+    if not key:
+        try:
+            key = st.secrets.get("GROQ_API_KEY")
+        except Exception:
+            key = None
+
+    return key
 
 
-# =========================================================
-# DEFAULT SYSTEM PROMPT
-# =========================================================
+api_key = get_api_key()
 
-DEFAULT_SYSTEM_PROMPT = """
-You are RacharlaGPT, a helpful, intelligent, friendly and concise AI assistant.
-
-IMPORTANT BEHAVIOR:
-
-1. Understand spelling mistakes, typing mistakes, abbreviations,
-   and imperfect English. Never stop responding just because the
-   user misspelled a word.
-
-2. Interpret the user's intended meaning from context.
-   For example, "speciality", "specialty", "speaciality",
-   or similar spellings should normally be understood as
-   "specialty/speciality".
-
-3. Always try to answer the user's actual question.
-   If a question is ambiguous, explain the likely meaning and
-   ask a short clarification only when necessary.
-
-4. You know the current date provided below.
-   Use it when the user asks:
-   - today
-   - tomorrow
-   - yesterday
-   - day of the week
-   - current date
-   - this week
-   - this month
-   - relative dates
-
-5. Do not incorrectly claim that you cannot know today's day
-   when the current date is explicitly provided in this prompt.
-
-6. Give accurate, clear and useful answers.
-
-7. Use headings, bullet points, numbered steps and tables
-   when they improve readability.
-
-8. If the user asks for code, provide complete working code
-   and briefly explain important changes.
-
-9. Do not invent facts. If you are uncertain, say so.
-
-10. Be practical and solution-oriented.
-"""
-
-
-# =========================================================
-# CURRENT DATE / TIME CONTEXT
-# =========================================================
-
-now_local = datetime.now().astimezone()
-
-CURRENT_DATE = now_local.strftime("%Y-%m-%d")
-CURRENT_DAY = now_local.strftime("%A")
-CURRENT_TIME = now_local.strftime("%I:%M %p")
-CURRENT_TIMEZONE = now_local.strftime("%Z")
-
-DATE_CONTEXT = f"""
-CURRENT DATE AND TIME CONTEXT:
-
-Date: {CURRENT_DATE}
-Day: {CURRENT_DAY}
-Time: {CURRENT_TIME}
-Timezone: {CURRENT_TIMEZONE}
-
-Use this information for relative-date questions.
-"""
-
-
-# =========================================================
-# SECRET HELPER
-# =========================================================
-
-def secret(name):
-    value = os.environ.get(name)
-
-    if value:
-        return value.strip()
-
-    try:
-        value = st.secrets.get(name)
-
-        if value:
-            return str(value).strip()
-
-    except Exception:
-        pass
-
-    return None
-
-
-GROQ_API_KEY = secret("GROQ_API_KEY")
-SUPABASE_URL = secret("SUPABASE_URL")
-SUPABASE_KEY = secret("SUPABASE_KEY")
-
-
-# =========================================================
-# CONFIG CHECK
-# =========================================================
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-
-    st.error("Supabase is not configured.")
-
-    st.info(
-        "Add SUPABASE_URL and SUPABASE_KEY in "
-        "Streamlit Cloud → Manage app → Settings → Secrets."
-    )
-
-    st.stop()
-
-
-if not GROQ_API_KEY:
-
+if not api_key:
     st.error("GROQ_API_KEY is not configured.")
-
+    st.info(
+        "For Streamlit Cloud: open your app → Settings → Secrets and add "
+        'GROQ_API_KEY = "your_groq_api_key_here"'
+    )
     st.stop()
 
-
-os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-
-
-# =========================================================
-# SUPABASE CLIENT
-# =========================================================
-
-if "supabase_client" not in st.session_state:
-
-    st.session_state.supabase_client = create_client(
-        SUPABASE_URL,
-        SUPABASE_KEY,
-    )
+os.environ["GROQ_API_KEY"] = api_key
 
 
-supabase: Client = st.session_state.supabase_client
-
-
-# =========================================================
-# CSS
-# =========================================================
-
+# ============================================================
+# Styling
+# ============================================================
 st.markdown(
     """
     <style>
-
-    .stApp {
-        background: #ffffff;
-    }
-
-    section[data-testid="stSidebar"] {
-        background: #f7f8fc;
-        border-right: 1px solid #e7e9ef;
-    }
-
-    .brand {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin: 8px 0 4px;
-    }
-
-    .icon {
-        width: 42px;
-        height: 42px;
-        border-radius: 13px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 23px;
-        background: linear-gradient(
-            135deg,
-            #ff4b4b,
-            #ff9f1c
-        );
-    }
-
-    .name {
-        font-size: 30px;
-        font-weight: 800;
-        color: #172033;
-        letter-spacing: -1px;
-    }
-
-    .sub {
-        color: #6b7280;
-        margin: 0 0 24px 54px;
-        font-size: 14px;
-    }
-
-    .auth {
-        max-width: 480px;
-        margin: 7vh auto;
-        text-align: center;
-    }
-
-    .welcome {
-        max-width: 760px;
-        margin: 10vh auto 3vh;
-        text-align: center;
-        padding: 35px 20px;
-    }
-
-    .wtitle {
-        font-size: 34px;
-        font-weight: 800;
-        color: #172033;
-    }
-
-    .wtext {
-        color: #6b7280;
-        line-height: 1.6;
-    }
-
-    @media(max-width:700px) {
-
-        .name {
-            font-size: 25px;
+        /* ---------- Global ---------- */
+        .stApp {
+            background: #ffffff;
         }
 
-        .wtitle {
-            font-size: 27px;
+        /* ---------- Header ---------- */
+        .app-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin: 6px 0 4px 0;
         }
 
-        .sub {
-            margin-left: 0;
+        .brand-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 23px;
+            background: linear-gradient(135deg, #ff4b4b, #ff9f1c);
+            box-shadow: 0 8px 24px rgba(255, 75, 75, 0.20);
         }
 
-    }
+        .brand-name {
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: #172033;
+        }
 
+        .brand-subtitle {
+            color: #6b7280;
+            margin: 0 0 24px 55px;
+            font-size: 14px;
+        }
+
+        /* ---------- Sidebar ---------- */
+        section[data-testid="stSidebar"] {
+            background: #f7f8fc;
+            border-right: 1px solid #e7e9ef;
+        }
+
+        section[data-testid="stSidebar"] .block-container {
+            padding-top: 1.25rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+
+        .sidebar-brand {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-size: 22px;
+            font-weight: 800;
+            color: #172033;
+            margin-bottom: 14px;
+        }
+
+        .sidebar-badge {
+            font-size: 20px;
+        }
+
+        .history-label {
+            margin-top: 22px;
+            margin-bottom: 8px;
+            color: #8a8f9d;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: .8px;
+        }
+
+        .empty-history {
+            color: #8a8f9d;
+            font-size: 13px;
+            padding: 12px 6px;
+        }
+
+        /* Make chat-history buttons look like clean list items. */
+        div[data-testid="stSidebar"] button {
+            border-radius: 11px !important;
+        }
+
+        /* ---------- Chat area ---------- */
+        .welcome-card {
+            max-width: 760px;
+            margin: 10vh auto 3vh auto;
+            text-align: center;
+            padding: 36px 24px;
+        }
+
+        .welcome-logo {
+            font-size: 48px;
+            margin-bottom: 8px;
+        }
+
+        .welcome-title {
+            font-size: 34px;
+            font-weight: 800;
+            color: #172033;
+            letter-spacing: -1px;
+        }
+
+        .welcome-text {
+            color: #6b7280;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        .suggestion {
+            border: 1px solid #e7e9ef;
+            border-radius: 14px;
+            padding: 14px 16px;
+            background: #fbfcff;
+            margin: 8px 0;
+            text-align: left;
+            color: #3f4654;
+        }
+
+        .chat-footer-note {
+            text-align: center;
+            color: #9aa0ad;
+            font-size: 11px;
+            margin-top: 12px;
+        }
+
+        /* ---------- Status card ---------- */
+        .status-card {
+            border: 1px solid #e7e9ef;
+            border-radius: 13px;
+            padding: 10px 12px;
+            background: white;
+            font-size: 12px;
+            color: #596170;
+        }
+
+        /* ---------- Mobile ---------- */
+        @media (max-width: 700px) {
+            .brand-name {
+                font-size: 25px;
+            }
+
+            .welcome-title {
+                font-size: 27px;
+            }
+        }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
-# =========================================================
-# AUTHENTICATION
-# =========================================================
+# ============================================================
+# Session state
+# ============================================================
+def new_chat_data():
+    return {
+        "title": "New Chat",
+        "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "updated": datetime.now().timestamp(),
+        "messages": [],
+    }
 
-def show_auth():
 
+if "chats" not in st.session_state:
+    first_id = str(uuid.uuid4())
+    st.session_state.chats = {first_id: new_chat_data()}
+    st.session_state.current_chat_id = first_id
+
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = next(iter(st.session_state.chats))
+
+if "system_prompt" not in st.session_state:
+    st.session_state.system_prompt = DEFAULT_SYSTEM_PROMPT
+
+if "search_history" not in st.session_state:
+    st.session_state.search_history = ""
+
+if "busy" not in st.session_state:
+    st.session_state.busy = False
+
+
+# ============================================================
+# Chat helpers
+# ============================================================
+def create_chat():
+    chat_id = str(uuid.uuid4())
+    st.session_state.chats[chat_id] = new_chat_data()
+    st.session_state.current_chat_id = chat_id
+
+
+def delete_chat(chat_id):
+    if chat_id in st.session_state.chats:
+        del st.session_state.chats[chat_id]
+
+    if not st.session_state.chats:
+        create_chat()
+        return
+
+    if st.session_state.current_chat_id == chat_id:
+        # Open the most recently updated remaining chat.
+        remaining = sorted(
+            st.session_state.chats.items(),
+            key=lambda item: item[1]["updated"],
+            reverse=True,
+        )
+        st.session_state.current_chat_id = remaining[0][0]
+
+
+def delete_all_chats():
+    first_id = str(uuid.uuid4())
+    st.session_state.chats = {first_id: new_chat_data()}
+    st.session_state.current_chat_id = first_id
+
+
+def current_chat():
+    chat_id = st.session_state.current_chat_id
+
+    if chat_id not in st.session_state.chats:
+        create_chat()
+
+    return st.session_state.chats[st.session_state.current_chat_id]
+
+
+def make_title(text):
+    cleaned = " ".join(text.strip().split())
+
+    if not cleaned:
+        return "New Chat"
+
+    # Keep sidebar titles compact.
+    if len(cleaned) <= 34:
+        return cleaned
+
+    return cleaned[:34].rstrip() + "…"
+
+
+def chat_matches(chat, query):
+    if not query:
+        return True
+
+    q = query.lower()
+
+    if q in chat["title"].lower():
+        return True
+
+    for message in chat["messages"]:
+        if q in message["content"].lower():
+            return True
+
+    return False
+
+
+def build_model_messages(chat):
+    recent = chat["messages"][-MAX_CONTEXT_MESSAGES:]
+
+    messages = [SystemMessage(content=st.session_state.system_prompt)]
+
+    for message in recent:
+        if message["role"] == "user":
+            messages.append(HumanMessage(content=message["content"]))
+        elif message["role"] == "assistant":
+            messages.append(AIMessage(content=message["content"]))
+
+    return messages
+
+
+# ============================================================
+# Model setup
+# ============================================================
+@st.cache_resource(show_spinner=False)
+def load_models(key):
+    primary = ChatGroq(
+        model=PRIMARY_MODEL,
+        temperature=0.7,
+        api_key=key,
+    )
+
+    backup = ChatGroq(
+        model=BACKUP_MODEL,
+        temperature=0.7,
+        api_key=key,
+    )
+
+    return primary, backup
+
+
+primary_llm, backup_llm = load_models(api_key)
+
+
+def ask_model(chat):
+    messages = build_model_messages(chat)
+
+    # Primary model first.
+    try:
+        return primary_llm.invoke(messages), "primary"
+
+    except RateLimitError:
+        # If the primary is temporarily rate-limited, try the lighter
+        # backup model.
+        try:
+            return backup_llm.invoke(messages), "backup"
+
+        except RateLimitError as backup_error:
+            raise backup_error
+
+
+# ============================================================
+# Sidebar
+# ============================================================
+with st.sidebar:
     st.markdown(
         """
-        <div class="auth">
-            <div style="font-size:52px">⚡</div>
-
-            <h1>Welcome to RacharlaGPT</h1>
-
-            <p style="color:#6b7280">
-                Sign in to save your conversations permanently.
-            </p>
+        <div class="sidebar-brand">
+            <span class="sidebar-badge">⚡</span>
+            <span>RacharlaGPT</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    _, center, _ = st.columns([1, 2, 1])
-
-    with center:
-
-        login_tab, signup_tab = st.tabs(
-            [
-                "🔐 Sign In",
-                "✨ Create Account",
-            ]
-        )
-
-        # =================================================
-        # SIGN IN
-        # =================================================
-
-        with login_tab:
-
-            with st.form("login_form"):
-
-                email = st.text_input(
-                    "Email",
-                    key="login_email",
-                )
-
-                password = st.text_input(
-                    "Password",
-                    type="password",
-                    key="login_password",
-                )
-
-                submit = st.form_submit_button(
-                    "Sign In",
-                    type="primary",
-                    use_container_width=True,
-                )
-
-            if submit:
-
-                if not email or not password:
-
-                    st.warning(
-                        "Enter your email and password."
-                    )
-
-                else:
-
-                    try:
-
-                        result = (
-                            supabase
-                            .auth
-                            .sign_in_with_password(
-                                {
-                                    "email": email.strip(),
-                                    "password": password,
-                                }
-                            )
-                        )
-
-                        if result.user and result.session:
-
-                            st.session_state.auth_user = (
-                                result.user
-                            )
-
-                            st.rerun()
-
-                        else:
-
-                            st.error(
-                                "Sign in failed."
-                            )
-
-                    except Exception as exc:
-
-                        st.error(
-                            f"Sign in failed: {exc}"
-                        )
-
-        # =================================================
-        # CREATE ACCOUNT
-        # =================================================
-
-        with signup_tab:
-
-            with st.form("signup_form"):
-
-                email = st.text_input(
-                    "Email",
-                    key="signup_email",
-                )
-
-                password = st.text_input(
-                    "Password",
-                    type="password",
-                    key="signup_password",
-                )
-
-                confirm = st.text_input(
-                    "Confirm password",
-                    type="password",
-                    key="signup_confirm",
-                )
-
-                submit = st.form_submit_button(
-                    "Create Account",
-                    type="primary",
-                    use_container_width=True,
-                )
-
-            if submit:
-
-                if not email or not password:
-
-                    st.warning(
-                        "Enter your email and password."
-                    )
-
-                elif password != confirm:
-
-                    st.warning(
-                        "Passwords do not match."
-                    )
-
-                elif len(password) < 6:
-
-                    st.warning(
-                        "Password must be at least 6 characters."
-                    )
-
-                else:
-
-                    try:
-
-                        result = supabase.auth.sign_up(
-                            {
-                                "email": email.strip(),
-                                "password": password,
-                            }
-                        )
-
-                        if result.session and result.user:
-
-                            st.session_state.auth_user = (
-                                result.user
-                            )
-
-                            st.rerun()
-
-                        else:
-
-                            st.success(
-                                "Account created. "
-                                "Check your email for confirmation, "
-                                "then sign in."
-                            )
-
-                    except Exception as exc:
-
-                        st.error(
-                            f"Account creation failed: {exc}"
-                        )
-
-
-# =========================================================
-# AUTH GATE
-# =========================================================
-
-if "auth_user" not in st.session_state:
-
-    show_auth()
-
-    st.stop()
-
-
-auth_user = st.session_state.auth_user
-
-USER_ID = str(auth_user.id)
-
-
-# =========================================================
-# STATE
-# =========================================================
-
-if "system_prompt" not in st.session_state:
-
-    st.session_state.system_prompt = (
-        DEFAULT_SYSTEM_PROMPT
-    )
-
-
-if "chats" not in st.session_state:
-
-    st.session_state.chats = {}
-
-
-if "current_chat_id" not in st.session_state:
-
-    st.session_state.current_chat_id = None
-
-
-if "loaded_from_supabase" not in st.session_state:
-
-    st.session_state.loaded_from_supabase = False
-
-
-if "search" not in st.session_state:
-
-    st.session_state.search = ""
-
-
-if "selected_model" not in st.session_state:
-
-    st.session_state.selected_model = (
-        "Auto (recommended)"
-    )
-
-
-if "temperature" not in st.session_state:
-
-    st.session_state.temperature = 0.7
-
-
-# =========================================================
-# CHAT HELPERS
-# =========================================================
-
-def blank_chat():
-
-    now = datetime.now(
-        timezone.utc
-    ).isoformat()
-
-    return {
-        "id": str(uuid.uuid4()),
-        "user_id": USER_ID,
-        "title": "New Chat",
-        "messages": [],
-        "created_at": now,
-        "updated_at": now,
-    }
-
-
-def load_chats():
-
-    result = (
-        supabase
-        .table("chats")
-        .select("*")
-        .eq("user_id", USER_ID)
-        .order("updated_at", desc=True)
-        .execute()
-    )
-
-    chats = {}
-
-    for row in result.data or []:
-
-        chats[str(row["id"])] = {
-
-            "id": str(row["id"]),
-
-            "user_id": str(
-                row["user_id"]
-            ),
-
-            "title": (
-                row.get("title")
-                or "New Chat"
-            ),
-
-            "messages": (
-                row.get("messages")
-                or []
-            ),
-
-            "created_at": row.get(
-                "created_at"
-            ),
-
-            "updated_at": row.get(
-                "updated_at"
-            ),
-        }
-
-    # Create first chat for new account
-    if not chats:
-
-        chat = blank_chat()
-
-        supabase.table(
-            "chats"
-        ).insert(chat).execute()
-
-        chats[chat["id"]] = chat
-
-    return chats
-
-
-def save_chat(chat):
-
-    now = datetime.now(
-        timezone.utc
-    ).isoformat()
-
-    (
-        supabase
-        .table("chats")
-        .update(
-            {
-                "title": chat["title"],
-                "messages": chat["messages"],
-                "updated_at": now,
-            }
-        )
-        .eq("id", chat["id"])
-        .eq("user_id", USER_ID)
-        .execute()
-    )
-
-    chat["updated_at"] = now
-
-
-def create_chat():
-
-    chat = blank_chat()
-
-    supabase.table(
-        "chats"
-    ).insert(chat).execute()
-
-    st.session_state.chats[
-        chat["id"]
-    ] = chat
-
-    st.session_state.current_chat_id = (
-        chat["id"]
-    )
-
-
-def delete_chat(chat_id):
-
-    (
-        supabase
-        .table("chats")
-        .delete()
-        .eq("id", chat_id)
-        .eq("user_id", USER_ID)
-        .execute()
-    )
-
-    st.session_state.chats.pop(
-        chat_id,
-        None,
-    )
-
-    if not st.session_state.chats:
-
-        create_chat()
-
-    else:
-
-        ordered = sorted(
-            st.session_state.chats.values(),
-            key=lambda x: x.get(
-                "updated_at"
-            ) or "",
-            reverse=True,
-        )
-
-        st.session_state.current_chat_id = (
-            ordered[0]["id"]
-        )
-
-
-def delete_all():
-
-    (
-        supabase
-        .table("chats")
-        .delete()
-        .eq("user_id", USER_ID)
-        .execute()
-    )
-
-    st.session_state.chats = {}
-
-    create_chat()
-
-
-def title_for(text):
-
-    text = " ".join(
-        text.strip().split()
-    )
-
-    if not text:
-
-        return "New Chat"
-
-    return (
-        text
-        if len(text) <= 34
-        else text[:34].rstrip() + "…"
-    )
-
-
-def current_chat():
-
-    if (
-        st.session_state.current_chat_id
-        not in st.session_state.chats
-    ):
-
-        create_chat()
-
-    return st.session_state.chats[
-        st.session_state.current_chat_id
-    ]
-
-
-# =========================================================
-# AI
-# =========================================================
-
-def build_messages(chat):
-
-    recent = chat["messages"][
-        -MAX_CONTEXT_MESSAGES:
-    ]
-
-    system_text = (
-        st.session_state.system_prompt
-        + "\n\n"
-        + DATE_CONTEXT
-    )
-
-    messages = [
-        SystemMessage(
-            content=system_text
-        )
-    ]
-
-    for message in recent:
-
-        content = str(
-            message.get("content", "")
-        )
-
-        if message["role"] == "user":
-
-            messages.append(
-                HumanMessage(
-                    content=content
-                )
-            )
-
-        else:
-
-            messages.append(
-                AIMessage(
-                    content=content
-                )
-            )
-
-    return messages
-
-
-def make_llm(model_name):
-
-    return ChatGroq(
-        model=model_name,
-        temperature=(
-            st.session_state.temperature
-        ),
-        api_key=GROQ_API_KEY,
-    )
-
-
-def ask(chat):
-
-    messages = build_messages(chat)
-
-    selected = (
-        st.session_state.selected_model
-    )
-
-    # -----------------------------------------------------
-    # Explicit primary model
-    # -----------------------------------------------------
-
-    if selected == PRIMARY_MODEL:
-
-        try:
-
-            llm = make_llm(
-                PRIMARY_MODEL
-            )
-
-            return (
-                llm.invoke(messages),
-                "primary",
-            )
-
-        except RateLimitError:
-
-            llm = make_llm(
-                BACKUP_MODEL
-            )
-
-            return (
-                llm.invoke(messages),
-                "backup",
-            )
-
-        except Exception as primary_error:
-
-            try:
-
-                llm = make_llm(
-                    BACKUP_MODEL
-                )
-
-                return (
-                    llm.invoke(messages),
-                    "backup",
-                )
-
-            except Exception:
-
-                raise primary_error
-
-    # -----------------------------------------------------
-    # Explicit backup model
-    # -----------------------------------------------------
-
-    if selected == BACKUP_MODEL:
-
-        llm = make_llm(
-            BACKUP_MODEL
-        )
-
-        return (
-            llm.invoke(messages),
-            "backup",
-        )
-
-    # -----------------------------------------------------
-    # Auto
-    # -----------------------------------------------------
-
-    try:
-
-        llm = make_llm(
-            PRIMARY_MODEL
-        )
-
-        return (
-            llm.invoke(messages),
-            "primary",
-        )
-
-    except RateLimitError:
-
-        llm = make_llm(
-            BACKUP_MODEL
-        )
-
-        return (
-            llm.invoke(messages),
-            "backup",
-        )
-
-    except Exception as primary_error:
-
-        try:
-
-            llm = make_llm(
-                BACKUP_MODEL
-            )
-
-            return (
-                llm.invoke(messages),
-                "backup",
-            )
-
-        except Exception:
-
-            raise primary_error
-
-
-# =========================================================
-# LOAD FROM SUPABASE
-# =========================================================
-
-if not st.session_state.loaded_from_supabase:
-
-    try:
-
-        st.session_state.chats = (
-            load_chats()
-        )
-
-        ordered = sorted(
-            st.session_state.chats.values(),
-            key=lambda x: x.get(
-                "updated_at"
-            ) or "",
-            reverse=True,
-        )
-
-        if ordered:
-
-            st.session_state.current_chat_id = (
-                ordered[0]["id"]
-            )
-
-        st.session_state.loaded_from_supabase = (
-            True
-        )
-
-    except Exception as exc:
-
-        st.error(
-            "Could not load chats from Supabase."
-        )
-
-        st.code(
-            str(exc)
-        )
-
-        st.stop()
-
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-
-with st.sidebar:
-
-    st.markdown(
-        "## ⚡ RacharlaGPT"
-    )
-
-    # -----------------------------------------------------
-    # New Chat
-    # -----------------------------------------------------
-
     if st.button(
-        "＋ New Chat",
+        "＋  New Chat",
+        use_container_width=True,
         type="primary",
-        use_container_width=True,
+        key="new_chat_btn",
     ):
-
         create_chat()
-
         st.rerun()
 
-    # -----------------------------------------------------
-    # User
-    # -----------------------------------------------------
-
-    st.caption(
-        "Signed in: "
-        + str(
-            getattr(
-                auth_user,
-                "email",
-                "User",
-            )
-        )
-    )
-
-    # -----------------------------------------------------
-    # Sign Out
-    # -----------------------------------------------------
-
-    if st.button(
-        "🚪 Sign Out",
-        use_container_width=True,
-    ):
-
-        try:
-
-            supabase.auth.sign_out()
-
-        except Exception:
-
-            pass
-
-        for key in [
-            "auth_user",
-            "chats",
-            "current_chat_id",
-            "loaded_from_supabase",
-        ]:
-
-            st.session_state.pop(
-                key,
-                None,
-            )
-
-        st.rerun()
-
-    st.markdown(
-        "### YOUR CHATS"
-    )
-
-    # -----------------------------------------------------
-    # Search
-    # -----------------------------------------------------
+    st.markdown('<div class="history-label">YOUR CHATS</div>', unsafe_allow_html=True)
 
     search = st.text_input(
-        "Search",
+        "Search chats",
+        value=st.session_state.search_history,
         placeholder="🔎 Search your chats...",
         label_visibility="collapsed",
+        key="chat_search_box",
     )
+    st.session_state.search_history = search
 
-    st.session_state.search = search
-
-    # -----------------------------------------------------
-    # Rename
-    # -----------------------------------------------------
-
-    if (
-        st.session_state.current_chat_id
-        in st.session_state.chats
-    ):
-
-        with st.expander(
-            "✏️ Rename current chat"
-        ):
-
-            rename_value = st.text_input(
-                "Chat name",
-                value=(
-                    st.session_state
-                    .chats[
-                        st.session_state
-                        .current_chat_id
-                    ]["title"]
-                ),
-                key="rename_chat_title",
-            )
-
-            if st.button(
-                "Save name",
-                use_container_width=True,
-            ):
-
-                rename_value = " ".join(
-                    rename_value.strip().split()
-                )
-
-                if rename_value:
-
-                    current = (
-                        st.session_state
-                        .chats[
-                            st.session_state
-                            .current_chat_id
-                        ]
-                    )
-
-                    current["title"] = (
-                        rename_value[:80]
-                    )
-
-                    save_chat(
-                        current
-                    )
-
-                    st.rerun()
-
-    # -----------------------------------------------------
-    # Chat list
-    # -----------------------------------------------------
-
-    ordered = sorted(
+    chats_sorted = sorted(
         st.session_state.chats.items(),
-        key=lambda x: x[1].get(
-            "updated_at"
-        ) or "",
+        key=lambda item: item[1]["updated"],
         reverse=True,
     )
 
-    for chat_id, item in ordered:
+    visible_chats = [
+        (chat_id, chat)
+        for chat_id, chat in chats_sorted
+        if chat_matches(chat, search)
+    ]
 
-        q = search.lower().strip()
-
-        matches = (
-            not q
-            or q in item["title"].lower()
-            or any(
-                q
-                in str(
-                    message.get(
-                        "content",
-                        "",
-                    )
-                ).lower()
-                for message in item[
-                    "messages"
-                ]
-            )
+    if not visible_chats:
+        st.markdown(
+            '<div class="empty-history">No chats match your search.</div>',
+            unsafe_allow_html=True,
         )
 
-        if not matches:
+    for chat_id, chat in visible_chats:
+        col_chat, col_delete = st.columns([0.80, 0.20], gap="small")
 
-            continue
+        is_current = chat_id == st.session_state.current_chat_id
 
-        c1, c2 = st.columns(
-            [4, 1]
-        )
-
-        with c1:
-
+        with col_chat:
             if st.button(
-                f"💬 {item['title']}",
+                f"💬  {chat['title']}",
                 key=f"open_{chat_id}",
                 use_container_width=True,
+                type="secondary" if not is_current else "primary",
+                help="Open this conversation",
             ):
-
-                st.session_state.current_chat_id = (
-                    chat_id
-                )
-
+                st.session_state.current_chat_id = chat_id
                 st.rerun()
 
-        with c2:
-
+        with col_delete:
             if st.button(
                 "🗑️",
-                key=f"del_{chat_id}",
+                key=f"delete_{chat_id}",
                 use_container_width=True,
+                help=f"Delete '{chat['title']}'",
             ):
-
-                delete_chat(
-                    chat_id
-                )
-
+                delete_chat(chat_id)
                 st.rerun()
 
     st.divider()
 
-    # =====================================================
-    # DOWNLOAD CHAT
-    # Plain TXT = maximum device compatibility
-    # =====================================================
-
-    current_export = (
-        st.session_state.chats.get(
-            st.session_state.current_chat_id
-        )
-    )
-
-    if current_export:
-
-        export_lines = []
-
-        export_lines.append(
-            current_export["title"]
-        )
-
-        export_lines.append(
-            "="
-            * len(
-                current_export["title"]
-            )
-        )
-
-        export_lines.append("")
-
-        for message in current_export.get(
-            "messages",
-            [],
-        ):
-
-            if message.get("role") == "user":
-
-                role = "YOU"
-
-            else:
-
-                role = "RACHARLAGPT"
-
-            export_lines.append(
-                role
-            )
-
-            export_lines.append(
-                "-" * len(role)
-            )
-
-            export_lines.append(
-                str(
-                    message.get(
-                        "content",
-                        "",
-                    )
-                )
-            )
-
-            export_lines.append("")
-
-        export_text = "\n".join(
-            export_lines
-        )
-
-        safe_filename = (
-            current_export["title"]
-            .replace("/", "-")
-            .replace("\\", "-")
-            .replace(":", "-")
-            .replace("*", "-")
-            .replace("?", "-")
-            .replace('"', "-")
-            .replace("<", "-")
-            .replace(">", "-")
-            .replace("|", "-")
-            .strip()
-        )
-
-        if not safe_filename:
-
-            safe_filename = "RacharlaGPT-chat"
-
-        safe_filename = (
-            safe_filename[:60]
-        )
-
-        st.download_button(
-            "⬇️ Download Chat (.txt)",
-            data=export_text,
-            file_name=(
-                safe_filename
-                + ".txt"
-            ),
-            mime="text/plain; charset=utf-8",
-            use_container_width=True,
-            on_click="ignore",
-        )
-
-        st.caption(
-            "TXT format opens on Android, iPhone, "
-            "Windows, Mac and other devices."
-        )
-
-    # =====================================================
-    # DELETE ALL
-    # =====================================================
-
     if st.button(
-        "🗑️ Delete All Chats",
+        "🗑️  Delete All Chats",
         use_container_width=True,
+        key="delete_all_btn",
     ):
-
-        delete_all()
-
+        delete_all_chats()
         st.rerun()
 
     st.divider()
 
-    # =====================================================
-    # AI SETTINGS
-    # =====================================================
+    st.markdown("### ⚙️ Configuration")
 
-    with st.expander(
-        "⚙️ AI Settings",
-        expanded=False,
-    ):
+    st.session_state.system_prompt = st.text_area(
+        "AI System Prompt",
+        value=st.session_state.system_prompt,
+        height=155,
+        help="Controls the assistant's personality and response style.",
+    )
 
-        st.session_state.selected_model = (
-            st.selectbox(
-                "Model",
-                MODEL_OPTIONS,
-                index=MODEL_OPTIONS.index(
-                    st.session_state.selected_model
-                ),
-            )
-        )
-
-        st.session_state.temperature = (
-            st.slider(
-                "Creativity",
-                min_value=0.0,
-                max_value=1.2,
-                value=float(
-                    st.session_state.temperature
-                ),
-                step=0.1,
-                help=(
-                    "Lower = more focused. "
-                    "Higher = more creative."
-                ),
-            )
-        )
-
-        st.session_state.system_prompt = (
-            st.text_area(
-                "AI System Prompt",
-                value=(
-                    st.session_state.system_prompt
-                ),
-                height=180,
-            )
-        )
-
-        if st.button(
-            "↩️ Reset AI Settings",
-            use_container_width=True,
-        ):
-
-            st.session_state.selected_model = (
-                "Auto (recommended)"
-            )
-
-            st.session_state.temperature = 0.7
-
-            st.session_state.system_prompt = (
-                DEFAULT_SYSTEM_PROMPT
-            )
-
-            st.rerun()
-
-    st.caption(
-        f"Primary: {PRIMARY_MODEL}"
+    st.markdown(
+        f"""
+        <div class="status-card">
+            <b>Model</b><br>
+            {PRIMARY_MODEL}<br><br>
+            <b>Fallback</b><br>
+            {BACKUP_MODEL}
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     st.caption(
-        f"Fallback: {BACKUP_MODEL}"
-    )
-
-    st.caption(
-        "☁️ Chats stored in Supabase"
+        "Your visible chat history stays in this browser session. "
+        "For permanent multi-device history, connect a database such as Supabase later."
     )
 
 
-# =========================================================
-# MAIN UI
-# =========================================================
-
+# ============================================================
+# Main header
+# ============================================================
 st.markdown(
     """
-    <div class="brand">
-        <div class="icon">⚡</div>
-        <div class="name">RacharlaGPT</div>
+    <div class="app-brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-name">RacharlaGPT</div>
     </div>
-
-    <div class="sub">
-        Fast, intelligent AI conversations powered by Groq
-    </div>
+    <div class="brand-subtitle">Fast, intelligent AI conversations powered by Groq</div>
     """,
     unsafe_allow_html=True,
 )
 
 
+# ============================================================
+# Current conversation
+# ============================================================
 chat = current_chat()
 
-
-# =========================================================
-# EMPTY CHAT
-# =========================================================
-
 if not chat["messages"]:
-
     st.markdown(
         """
-        <div class="welcome">
-
-            <div style="font-size:48px">
-                ⚡
+        <div class="welcome-card">
+            <div class="welcome-logo">⚡</div>
+            <div class="welcome-title">Welcome to RacharlaGPT</div>
+            <div class="welcome-text">
+                Ask questions, write code, brainstorm ideas, learn something new,
+                or simply have a conversation.
             </div>
-
-            <div class="wtitle">
-                Welcome to RacharlaGPT
-            </div>
-
-            <div class="wtext">
-                Your conversations are saved to your account.
-                Ask questions, write code, brainstorm ideas,
-                or learn something new.
-            </div>
-
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    suggestion_cols = st.columns(3)
 
-# =========================================================
-# DISPLAY MESSAGES
-# =========================================================
+    suggestions = [
+        ("💡 Learn", "Explain a difficult topic simply"),
+        ("💻 Code", "Build a Streamlit application"),
+        ("🚀 Create", "Give me a creative project idea"),
+    ]
 
+    for col, (heading, prompt_text) in zip(suggestion_cols, suggestions):
+        with col:
+            st.markdown(
+                f"""
+                <div class="suggestion">
+                    <b>{heading}</b><br>
+                    <span>{prompt_text}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+# Render complete visible history.
 for message in chat["messages"]:
-
-    with st.chat_message(
-        message["role"]
-    ):
-
-        st.markdown(
-            message["content"]
-        )
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 
-# =========================================================
-# CHAT INPUT
-# =========================================================
-
+# ============================================================
+# Chat input
+# ============================================================
 user_input = st.chat_input(
-    "Message RacharlaGPT..."
+    "Message RacharlaGPT...",
+    disabled=st.session_state.busy,
 )
 
-
 if user_input:
-
     user_input = user_input.strip()
 
     if user_input:
-
-        # -------------------------------------------------
-        # Save user message immediately
-        # -------------------------------------------------
-
+        # Save and display the user's message immediately.
         chat["messages"].append(
             {
                 "role": "user",
@@ -1427,183 +577,77 @@ if user_input:
             }
         )
 
-        # -------------------------------------------------
-        # Automatic title
-        # -------------------------------------------------
+        chat["updated"] = datetime.now().timestamp()
 
+        # Automatically name a new conversation from its first question.
         if chat["title"] == "New Chat":
+            chat["title"] = make_title(user_input)
 
-            chat["title"] = title_for(
-                user_input
-            )
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-        # -------------------------------------------------
-        # Display user message
-        # -------------------------------------------------
-
-        with st.chat_message(
-            "user"
-        ):
-
-            st.markdown(
-                user_input
-            )
-
-        # -------------------------------------------------
-        # Save BEFORE contacting AI
-        # -------------------------------------------------
-
-        try:
-
-            save_chat(chat)
-
-        except Exception as save_error:
-
-            st.warning(
-                "Message was received, but "
-                "saving to Supabase failed."
-            )
-
-            print(
-                f"Save error: {save_error}"
-            )
-
-        # -------------------------------------------------
-        # AI response
-        # -------------------------------------------------
-
-        try:
-
-            with st.chat_message(
-                "assistant"
-            ):
-
-                with st.spinner(
-                    "RacharlaGPT is thinking…"
-                ):
-
-                    response, used = ask(
-                        chat
-                    )
+        with st.chat_message("assistant"):
+            try:
+                with st.spinner("RacharlaGPT is thinking…"):
+                    response, model_used = ask_model(chat)
 
                 answer = response.content
 
-                if not isinstance(
-                    answer,
-                    str,
-                ):
+                if not isinstance(answer, str):
+                    answer = str(answer)
 
-                    answer = str(
-                        answer
-                    )
-
-                answer = answer.strip()
-
-                if not answer:
-
-                    answer = (
-                        "I couldn't generate a response "
-                        "this time. Please try again."
-                    )
-
-                st.markdown(
-                    answer
+                # Save assistant response.
+                chat["messages"].append(
+                    {
+                        "role": "assistant",
+                        "content": answer,
+                    }
                 )
 
-                if used == "backup":
+                chat["updated"] = datetime.now().timestamp()
 
+                if model_used == "backup":
                     st.caption(
-                        "Primary model was unavailable; "
-                        f"answered with {BACKUP_MODEL}."
+                        f"Primary model was temporarily rate-limited. "
+                        f"Answered using `{BACKUP_MODEL}`."
                     )
 
-            # ---------------------------------------------
-            # Save AI response
-            # ---------------------------------------------
+                st.markdown(answer)
 
-            chat["messages"].append(
-                {
-                    "role": "assistant",
-                    "content": answer,
-                }
-            )
-
-            try:
-
-                save_chat(
-                    chat
+            except RateLimitError:
+                # Friendly handling instead of exposing a traceback.
+                # This is especially useful when Groq daily token limits
+                # have been exhausted.
+                friendly = (
+                    "⚠️ **Groq rate limit reached.**\n\n"
+                    "The available Groq quota for the selected models is "
+                    "temporarily exhausted. This is an API quota issue, not "
+                    "a problem with your question.\n\n"
+                    "Please wait for the quota window to reset, then try again."
                 )
 
-            except Exception as save_error:
+                st.markdown(friendly)
 
-                st.warning(
-                    "The response was generated, "
-                    "but saving it to Supabase failed."
-                )
+                # Remove the unsent user message so the UI does not pretend
+                # the question received a real answer.
+                if chat["messages"] and chat["messages"][-1]["role"] == "user":
+                    chat["messages"].pop()
 
-                print(
-                    f"Response save error: {save_error}"
-                )
-
-        # -------------------------------------------------
-        # Rate limit
-        # -------------------------------------------------
-
-        except RateLimitError:
-
-            with st.chat_message(
-                "assistant"
-            ):
-
-                st.warning(
-                    "Both Groq models are currently "
-                    "rate-limited. Please wait a few minutes "
-                    "and try again."
-                )
-
-            # Keep user's message.
-            # It is NOT deleted.
-
-        # -------------------------------------------------
-        # Other error
-        # -------------------------------------------------
-
-        except Exception as exc:
-
-            with st.chat_message(
-                "assistant"
-            ):
-
+            except Exception as exc:
                 st.error(
-                    "RacharlaGPT could not generate "
-                    "a response this time."
-                )
-
-                st.caption(
-                    "Your message has been kept in the chat. "
+                    "Something went wrong while contacting Groq. "
                     "Please try again."
                 )
 
-            print(
-                f"RacharlaGPT error: "
-                f"{type(exc).__name__}: {exc}"
-            )
+                # Keep the actual error out of the normal UI, but leave
+                # enough information for debugging in the server log.
+                print(f"RacharlaGPT error: {type(exc).__name__}: {exc}")
 
+                if chat["messages"] and chat["messages"][-1]["role"] == "user":
+                    chat["messages"].pop()
 
-# =========================================================
-# FOOTER
-# =========================================================
 
 st.markdown(
-    """
-    <div style="
-        text-align:center;
-        color:#9aa0ad;
-        font-size:11px;
-        margin-top:12px;
-    ">
-        RacharlaGPT • Powered by Groq • Chats stored in Supabase
-    </div>
-    """,
+    '<div class="chat-footer-note">RacharlaGPT • Powered by Groq • AI can make mistakes, so verify important information.</div>',
     unsafe_allow_html=True,
 )

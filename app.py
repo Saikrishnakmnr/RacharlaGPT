@@ -8,6 +8,7 @@ from groq import RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
+from streamlit_cookies_controller import CookieController
 
 st.set_page_config(
     page_title="RacharlaGPT",
@@ -63,6 +64,7 @@ if "supabase_client" not in st.session_state:
     st.session_state.supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase: Client = st.session_state.supabase_client
+cookies = CookieController()
 
 
 st.markdown("""
@@ -83,6 +85,36 @@ section[data-testid="stSidebar"] { background:#f7f8fc; border-right:1px solid #e
 
 
 # ---------------- Authentication ----------------
+def restore_saved_session():
+    try:
+        access_token = cookies.get("racharlagpt_access_token")
+        refresh_token = cookies.get("racharlagpt_refresh_token")
+        if access_token and refresh_token:
+            result = supabase.auth.set_session(access_token, refresh_token)
+            if result.user and result.session:
+                st.session_state.auth_user = result.user
+                # Supabase rotates refresh tokens, so save the newest pair.
+                cookies.set("racharlagpt_access_token", result.session.access_token, max_age=60 * 60)
+                cookies.set("racharlagpt_refresh_token", result.session.refresh_token, max_age=60 * 60 * 24 * 365)
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def save_session_cookie(session):
+    cookies.set("racharlagpt_access_token", session.access_token, max_age=60 * 60)
+    cookies.set("racharlagpt_refresh_token", session.refresh_token, max_age=60 * 60 * 24 * 365)
+
+
+def clear_session_cookie():
+    try:
+        cookies.remove("racharlagpt_access_token")
+        cookies.remove("racharlagpt_refresh_token")
+    except Exception:
+        pass
+
+
 def show_auth():
     st.markdown("""
     <div class="auth">
@@ -113,6 +145,7 @@ def show_auth():
                         })
                         if result.user and result.session:
                             st.session_state.auth_user = result.user
+                            save_session_cookie(result.session)
                             st.rerun()
                         else:
                             st.error("Sign in failed.")
@@ -141,12 +174,17 @@ def show_auth():
                         })
                         if result.session and result.user:
                             st.session_state.auth_user = result.user
+                            save_session_cookie(result.session)
                             st.rerun()
                         else:
                             st.success("Account created. Check your email for confirmation, then sign in.")
                     except Exception as exc:
                         st.error(f"Account creation failed: {exc}")
 
+
+# Restore Supabase session from browser cookies after a Streamlit refresh.
+if "auth_user" not in st.session_state:
+    restore_saved_session()
 
 # IMPORTANT: no authenticated user = login screen only.
 if "auth_user" not in st.session_state:
@@ -333,6 +371,7 @@ with st.sidebar:
             supabase.auth.sign_out()
         except Exception:
             pass
+        clear_session_cookie()
         for key in ["auth_user", "chats", "current_chat_id", "loaded_from_supabase"]:
             st.session_state.pop(key, None)
         st.rerun()

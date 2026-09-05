@@ -322,6 +322,22 @@ with st.sidebar:
     search = st.text_input("Search", placeholder="🔎 Search your chats...", label_visibility="collapsed")
     st.session_state.search = search
 
+    # Safe rename: only changes the existing chat title in Supabase.
+    if st.session_state.current_chat_id in st.session_state.chats:
+        with st.expander("✏️ Rename current chat"):
+            rename_value = st.text_input(
+                "Chat name",
+                value=st.session_state.chats[st.session_state.current_chat_id]["title"],
+                key="rename_chat_title",
+            )
+            if st.button("Save name", use_container_width=True):
+                rename_value = " ".join(rename_value.strip().split())
+                if rename_value:
+                    current = st.session_state.chats[st.session_state.current_chat_id]
+                    current["title"] = rename_value[:80]
+                    save_chat(current)
+                    st.rerun()
+
     ordered = sorted(st.session_state.chats.items(), key=lambda x: x[1].get("updated_at") or "", reverse=True)
     for chat_id, item in ordered:
         q = search.lower().strip()

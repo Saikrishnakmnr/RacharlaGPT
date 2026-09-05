@@ -8,7 +8,7 @@ from groq import RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
-from streamlit_cookies_controller import CookieController
+from streamlit_cookies_manager import EncryptedCookieManager
 
 st.set_page_config(
     page_title="RacharlaGPT",
@@ -64,7 +64,21 @@ if "supabase_client" not in st.session_state:
     st.session_state.supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 supabase: Client = st.session_state.supabase_client
-cookies = CookieController()
+COOKIE_PASSWORD = secret("COOKIE_PASSWORD")
+if not COOKIE_PASSWORD:
+    st.error("COOKIE_PASSWORD is not configured.")
+    st.info("Add COOKIE_PASSWORD in Streamlit Cloud → Manage app → Settings → Secrets.")
+    st.stop()
+
+if "cookie_manager" not in st.session_state:
+    st.session_state.cookie_manager = EncryptedCookieManager(
+        prefix="racharlagpt/",
+        password=COOKIE_PASSWORD,
+    )
+
+cookies = st.session_state.cookie_manager
+if not cookies.ready():
+    st.stop()
 
 
 st.markdown("""
@@ -94,8 +108,9 @@ def restore_saved_session():
             if result.user and result.session:
                 st.session_state.auth_user = result.user
                 # Supabase rotates refresh tokens, so save the newest pair.
-                cookies.set("racharlagpt_access_token", result.session.access_token, max_age=60 * 60)
-                cookies.set("racharlagpt_refresh_token", result.session.refresh_token, max_age=60 * 60 * 24 * 365)
+                cookies["racharlagpt_access_token"] = result.session.access_token
+                cookies["racharlagpt_refresh_token"] = result.session.refresh_token
+                cookies.save()
                 return True
     except Exception:
         pass
@@ -103,14 +118,18 @@ def restore_saved_session():
 
 
 def save_session_cookie(session):
-    cookies.set("racharlagpt_access_token", session.access_token, max_age=60 * 60)
-    cookies.set("racharlagpt_refresh_token", session.refresh_token, max_age=60 * 60 * 24 * 365)
+    cookies["racharlagpt_access_token"] = session.access_token
+    cookies["racharlagpt_refresh_token"] = session.refresh_token
+    cookies.save()
 
 
 def clear_session_cookie():
     try:
-        cookies.remove("racharlagpt_access_token")
-        cookies.remove("racharlagpt_refresh_token")
+        if "racharlagpt_access_token" in cookies:
+            del cookies["racharlagpt_access_token"]
+        if "racharlagpt_refresh_token" in cookies:
+            del cookies["racharlagpt_refresh_token"]
+        cookies.save()
     except Exception:
         pass
 
@@ -175,6 +194,8 @@ def show_auth():
                         if result.session and result.user:
                             st.session_state.auth_user = result.user
                             save_session_cookie(result.session)
+                            import time
+                            time.sleep(0.8)
                             st.rerun()
                         else:
                             st.success("Account created. Check your email for confirmation, then sign in.")
@@ -372,6 +393,8 @@ with st.sidebar:
         except Exception:
             pass
         clear_session_cookie()
+        import time
+        time.sleep(0.8)
         for key in ["auth_user", "chats", "current_chat_id", "loaded_from_supabase"]:
             st.session_state.pop(key, None)
         st.rerun()

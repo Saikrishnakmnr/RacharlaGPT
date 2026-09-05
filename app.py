@@ -169,7 +169,7 @@ def date_context():
 
 
 # ============================================================
-# CSS — POLISHED UI
+# CSS — UI ONLY
 # ============================================================
 
 st.markdown(
@@ -184,8 +184,10 @@ st.markdown(
         background: #ffffff;
     }
 
-    [data-testid="stHeader"] {
-        background: rgba(255,255,255,0.96);
+    .block-container {
+        max-width: 1280px;
+        padding-top: 1.1rem;
+        padding-bottom: 1rem;
     }
 
     section[data-testid="stSidebar"] {
@@ -193,54 +195,46 @@ st.markdown(
         border-right: 1px solid #e7e9ef;
     }
 
-    .block-container {
-        padding-top: 1.4rem;
-        padding-bottom: 1rem;
+    section[data-testid="stSidebar"] .block-container {
+        padding-top: 1rem;
+        padding-left: 0.9rem;
+        padding-right: 0.9rem;
     }
 
 
     /* ========================================================
-       LOGIN / AUTH PAGE
+       AUTH PAGE
        ======================================================== */
 
-    .auth-page-title {
+    .auth-left {
+        padding: 10px 18px 8px 4px;
+    }
+
+    .auth-logo-wrap {
+        margin-bottom: 7px;
+    }
+
+    .auth-heading {
         font-size: 32px;
         font-weight: 800;
-        line-height: 1.15;
+        letter-spacing: -1px;
         color: #172033;
-        margin: 0;
-        letter-spacing: -0.8px;
+        margin: 4px 0 4px 0;
     }
 
-    .auth-page-subtitle {
-        color: #6b7280;
-        font-size: 14px;
-        line-height: 1.55;
-        margin-top: 7px;
-        margin-bottom: 18px;
-    }
-
-    .auth-small-note {
-        color: #8a91a1;
-        font-size: 12px;
+    .auth-description {
+        color: #687386;
+        font-size: 15px;
         line-height: 1.5;
-        margin-top: 10px;
-    }
-
-    .auth-hero-title {
-        font-size: 24px;
-        font-weight: 800;
-        color: #172033;
-        margin-top: 12px;
-        margin-bottom: 4px;
-    }
-
-    .auth-hero-text {
-        color: #687083;
-        font-size: 14px;
-        line-height: 1.6;
-        max-width: 560px;
         margin-bottom: 12px;
+        max-width: 600px;
+    }
+
+    .auth-badge-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-bottom: 14px;
     }
 
     .auth-badge {
@@ -248,99 +242,226 @@ st.markdown(
         padding: 5px 10px;
         border-radius: 999px;
         background: #eef4ff;
-        color: #2457c5;
+        color: #2459b8;
         font-size: 12px;
         font-weight: 700;
-        margin-top: 4px;
     }
 
-    /* Keep Streamlit image compact on auth page */
-    .auth-banner-wrap {
-        display: flex;
-        justify-content: center;
+    .auth-banner-box {
         width: 100%;
+        max-width: 590px;
+        margin: 6px auto 0 auto;
     }
+
+    .auth-right {
+        padding: 5px 4px 0 4px;
+    }
+
+    .auth-card-title {
+        font-size: 29px;
+        font-weight: 800;
+        color: #172033;
+        margin-bottom: 3px;
+    }
+
+    .auth-card-subtitle {
+        color: #718096;
+        font-size: 14px;
+        line-height: 1.45;
+        margin-bottom: 13px;
+    }
+
+    div[data-testid="stForm"] {
+        border: 1px solid #e1e5ec;
+        border-radius: 15px;
+        padding: 18px 18px 14px 18px;
+        background: #ffffff;
+        box-shadow: 0 7px 25px rgba(20, 35, 70, 0.06);
+    }
+
+    div[data-testid="stForm"] label {
+        font-weight: 600;
+        color: #344054;
+    }
+
+    div[data-testid="stForm"] input {
+        border-radius: 10px;
+    }
+
+    button[kind="primary"] {
+        border-radius: 10px !important;
+        font-weight: 700 !important;
+        min-height: 43px !important;
+    }
+
+    div[data-baseweb="tab-list"] {
+        gap: 4px;
+        border-bottom: 1px solid #e5e7eb;
+        margin-bottom: 10px;
+    }
+
+    button[data-baseweb="tab"] {
+        font-weight: 600;
+        padding-left: 9px;
+        padding-right: 9px;
+    }
+
 
     /* ========================================================
        MAIN BRANDING
        ======================================================== */
 
-    .app-brand-name {
-        font-size: 30px;
+    .main-brand-name {
+        font-size: 29px;
         font-weight: 800;
         color: #172033;
-        letter-spacing: -1px;
+        letter-spacing: -0.8px;
         line-height: 1.1;
-        margin-top: 2px;
+        margin-top: 3px;
     }
 
-    .app-subtitle {
-        color: #6b7280;
-        font-size: 14px;
+    .main-brand-subtitle {
+        color: #7a8494;
+        font-size: 13px;
         margin-top: 3px;
-        margin-bottom: 10px;
     }
+
 
     /* ========================================================
        WELCOME
        ======================================================== */
 
     .welcome-box {
-        width: 100%;
-        max-width: 850px;
-        margin: 9vh auto 3vh auto;
+        max-width: 780px;
+        margin: 8vh auto 4vh auto;
         text-align: center;
-        padding: 20px;
+        padding: 22px 16px;
     }
 
     .welcome-title {
         font-size: 31px;
         font-weight: 800;
         color: #172033;
+        letter-spacing: -0.7px;
+        margin-bottom: 8px;
     }
 
     .welcome-text {
-        color: #6b7280;
-        line-height: 1.6;
-        max-width: 700px;
-        margin: 10px auto;
+        color: #707b8c;
+        line-height: 1.65;
+        max-width: 680px;
+        margin: 0 auto;
+        font-size: 15px;
     }
+
+
+    /* ========================================================
+       CHAT
+       ======================================================== */
+
+    div[data-testid="stChatMessage"] {
+        border-radius: 14px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+
+    .stChatInputContainer {
+        padding-bottom: 7px;
+    }
+
+
+    /* ========================================================
+       SIDEBAR
+       ======================================================== */
+
+    section[data-testid="stSidebar"] button {
+        border-radius: 9px;
+    }
+
+    section[data-testid="stSidebar"] .stButton button {
+        min-height: 37px;
+    }
+
+    section[data-testid="stSidebar"] .stDownloadButton button {
+        border-radius: 9px;
+        min-height: 37px;
+    }
+
+    section[data-testid="stSidebar"] hr {
+        margin-top: 10px;
+        margin-bottom: 10px;
+    }
+
 
     /* ========================================================
        MOBILE
        ======================================================== */
 
-    @media (max-width: 700px) {
+    @media (max-width: 768px) {
 
         .block-container {
-            padding-top: 0.8rem;
             padding-left: 0.75rem;
             padding-right: 0.75rem;
+            padding-top: 0.6rem;
         }
 
-        .auth-page-title {
-            font-size: 27px;
+        .auth-left {
+            padding: 2px 2px 8px 2px;
+            text-align: center;
         }
 
-        .auth-hero-title {
-            font-size: 21px;
+        .auth-logo-wrap {
+            margin-bottom: 3px;
         }
 
-        .auth-page-subtitle,
-        .auth-hero-text {
-            font-size: 13px;
+        .auth-heading {
+            font-size: 26px;
         }
 
-        .app-brand-name {
+        .auth-description {
+            font-size: 14px;
+            margin: 0 auto 9px auto;
+        }
+
+        .auth-badge-row {
+            justify-content: center;
+            margin-bottom: 9px;
+        }
+
+        .auth-banner-box {
+            max-width: 100%;
+            margin-top: 4px;
+        }
+
+        .auth-right {
+            padding: 3px 0 0 0;
+        }
+
+        .auth-card-title {
             font-size: 25px;
         }
 
-        .app-subtitle {
+        .auth-card-subtitle {
             font-size: 13px;
         }
 
+        div[data-testid="stForm"] {
+            padding: 15px 13px 11px 13px;
+            border-radius: 13px;
+            box-shadow: none;
+        }
+
+        .main-brand-name {
+            font-size: 25px;
+        }
+
+        .main-brand-subtitle {
+            font-size: 12px;
+        }
+
         .welcome-box {
-            margin-top: 5vh;
+            margin: 6vh auto 4vh auto;
+            padding: 15px 7px;
         }
 
         .welcome-title {
@@ -349,6 +470,38 @@ st.markdown(
 
         .welcome-text {
             font-size: 14px;
+        }
+    }
+
+
+    /* ========================================================
+       SMALL PHONES
+       ======================================================== */
+
+    @media (max-width: 430px) {
+
+        .auth-heading {
+            font-size: 24px;
+        }
+
+        .auth-description {
+            font-size: 13px;
+        }
+
+        .auth-card-title {
+            font-size: 23px;
+        }
+
+        .main-brand-name {
+            font-size: 23px;
+        }
+
+        .main-brand-subtitle {
+            font-size: 11px;
+        }
+
+        .welcome-title {
+            font-size: 23px;
         }
     }
 
@@ -364,63 +517,32 @@ st.markdown(
 
 def show_auth():
 
-    # --------------------------------------------------------
-    # Desktop: compact two-column login experience.
-    # Mobile: Streamlit automatically stacks the columns.
-    # This prevents the banner from pushing the login far down.
-    # --------------------------------------------------------
-
     left, right = st.columns(
-        [1.25, 0.9],
+        [1.08, 0.92],
         gap="large",
     )
 
     # ========================================================
-    # LEFT — BRAND / BANNER
+    # LEFT — BRANDING
     # ========================================================
 
     with left:
 
+        st.markdown(
+            '<div class="auth-left">',
+            unsafe_allow_html=True,
+        )
+
         if LOGO_PATH.exists():
-            logo_col1, logo_col2, logo_col3 = st.columns(
-                [1, 1.5, 1]
-            )
 
-            with logo_col2:
-                st.image(
-                    str(LOGO_PATH),
-                    width=82,
-                )
-
-        st.markdown(
-            '<div class="auth-hero-title">RacharlaGPT</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            '<div class="auth-hero-text">'
-            'A practical AI assistant for learning, coding, '
-            'ideas, research, and everyday questions.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            '<span class="auth-badge">⚡ Fast AI • ☁️ Saved Chats</span>',
-            unsafe_allow_html=True,
-        )
-
-        st.write("")
-
-        if BANNER_PATH.exists():
             st.markdown(
-                '<div class="auth-banner-wrap">',
+                '<div class="auth-logo-wrap">',
                 unsafe_allow_html=True,
             )
 
             st.image(
-                str(BANNER_PATH),
-                width=560,
+                str(LOGO_PATH),
+                width=78,
             )
 
             st.markdown(
@@ -428,11 +550,48 @@ def show_auth():
                 unsafe_allow_html=True,
             )
 
-        else:
-            st.info(
-                "Banner image not found. "
-                "Check assets/manatechsaavy_banner.jfif."
+        st.markdown(
+            """
+            <div class="auth-heading">
+                RacharlaGPT
+            </div>
+
+            <div class="auth-description">
+                A practical AI assistant for learning, coding,
+                ideas, research, and everyday questions.
+            </div>
+
+            <div class="auth-badge-row">
+                <span class="auth-badge">⚡ Fast AI</span>
+                <span class="auth-badge">☁️ Saved Chats</span>
+                <span class="auth-badge">🔐 Private Account</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if BANNER_PATH.exists():
+
+            st.markdown(
+                '<div class="auth-banner-box">',
+                unsafe_allow_html=True,
             )
+
+            st.image(
+                str(BANNER_PATH),
+                width=590,
+            )
+
+            st.markdown(
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
 
     # ========================================================
     # RIGHT — LOGIN CARD
@@ -441,14 +600,20 @@ def show_auth():
     with right:
 
         st.markdown(
-            '<div class="auth-page-title">Welcome back 👋</div>',
+            '<div class="auth-right">',
             unsafe_allow_html=True,
         )
 
         st.markdown(
-            '<div class="auth-page-subtitle">'
-            'Sign in to save and access your conversations permanently.'
-            '</div>',
+            """
+            <div class="auth-card-title">
+                Welcome back 👋
+            </div>
+
+            <div class="auth-card-subtitle">
+                Sign in to save and access your conversations permanently.
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -458,6 +623,7 @@ def show_auth():
                 "✨ Create Account",
             ]
         )
+
 
         # ====================================================
         # SIGN IN
@@ -485,6 +651,7 @@ def show_auth():
                     type="primary",
                     use_container_width=True,
                 )
+
 
             if submit:
 
@@ -529,12 +696,6 @@ def show_auth():
                             f"Sign in failed: {exc}"
                         )
 
-            st.markdown(
-                '<div class="auth-small-note">'
-                'Your chat history is stored securely in Supabase.'
-                '</div>',
-                unsafe_allow_html=True,
-            )
 
         # ====================================================
         # CREATE ACCOUNT
@@ -554,7 +715,7 @@ def show_auth():
                     "Password",
                     type="password",
                     key="signup_password",
-                    placeholder="At least 6 characters",
+                    placeholder="Create a password",
                 )
 
                 confirm = st.text_input(
@@ -569,6 +730,7 @@ def show_auth():
                     type="primary",
                     use_container_width=True,
                 )
+
 
             if submit:
 
@@ -623,6 +785,26 @@ def show_auth():
                         )
 
 
+        st.markdown(
+            """
+            <div style="
+                text-align:center;
+                color:#8a94a6;
+                font-size:11px;
+                margin-top:11px;
+            ">
+                🔒 Your chat history is securely stored in Supabase.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+
 # ============================================================
 # AUTH GATE
 # ============================================================
@@ -630,6 +812,7 @@ def show_auth():
 if "auth_user" not in st.session_state:
 
     show_auth()
+
     st.stop()
 
 
@@ -846,7 +1029,6 @@ def current_chat():
         st.session_state.current_chat_id
         not in st.session_state.chats
     ):
-
         create_chat()
 
     return st.session_state.chats[
@@ -893,9 +1075,10 @@ def ask(chat):
 
     selected = st.session_state.selected_model
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # PRIMARY ONLY
-    # --------------------------------------------------------
+    # ========================================================
 
     if selected == PRIMARY_MODEL:
 
@@ -919,9 +1102,10 @@ def ask(chat):
 
             return llm.invoke(msgs), "backup"
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # BACKUP ONLY
-    # --------------------------------------------------------
+    # ========================================================
 
     if selected == BACKUP_MODEL:
 
@@ -933,9 +1117,10 @@ def ask(chat):
 
         return llm.invoke(msgs), "backup"
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # AUTO
-    # --------------------------------------------------------
+    # ========================================================
 
     try:
 
@@ -975,16 +1160,14 @@ if not st.session_state.loaded_from_supabase:
         )
 
         if ordered:
+
             st.session_state.current_chat_id = ordered[0]["id"]
 
         st.session_state.loaded_from_supabase = True
 
     except Exception as exc:
 
-        st.error(
-            "Could not load chats from Supabase."
-        )
-
+        st.error("Could not load chats from Supabase.")
         st.code(str(exc))
         st.stop()
 
@@ -1009,15 +1192,17 @@ with st.sidebar:
     st.markdown(
         """
         <div style="
-            font-size:26px;
+            font-size:25px;
             font-weight:800;
-            margin-bottom:15px;
+            letter-spacing:-0.5px;
+            margin-bottom:13px;
         ">
             ⚡ RacharlaGPT
         </div>
         """,
         unsafe_allow_html=True,
     )
+
 
     # --------------------------------------------------------
     # NEW CHAT
@@ -1032,6 +1217,7 @@ with st.sidebar:
         create_chat()
         st.rerun()
 
+
     # --------------------------------------------------------
     # ACCOUNT
     # --------------------------------------------------------
@@ -1045,6 +1231,7 @@ with st.sidebar:
     st.caption(
         f"Signed in: {user_email}"
     )
+
 
     # --------------------------------------------------------
     # SIGN OUT
@@ -1076,7 +1263,11 @@ with st.sidebar:
 
         st.rerun()
 
-    st.markdown("### YOUR CHATS")
+
+    st.markdown(
+        "### YOUR CHATS"
+    )
+
 
     # --------------------------------------------------------
     # SEARCH
@@ -1089,6 +1280,7 @@ with st.sidebar:
     )
 
     st.session_state.search = search
+
 
     # --------------------------------------------------------
     # RENAME
@@ -1127,7 +1319,9 @@ with st.sidebar:
                     current["title"] = rename_value[:80]
 
                     save_chat(current)
+
                     st.rerun()
+
 
     # --------------------------------------------------------
     # CHAT LIST
@@ -1181,7 +1375,9 @@ with st.sidebar:
                 delete_chat(chat_id)
                 st.rerun()
 
+
     st.divider()
+
 
     # ========================================================
     # DOWNLOAD
@@ -1215,16 +1411,12 @@ with st.sidebar:
             txt_lines.append(f"\n{role}\n")
             txt_lines.append("-" * 30 + "\n")
             txt_lines.append(
-                str(
-                    message.get(
-                        "content",
-                        "",
-                    )
-                )
+                str(message.get("content", ""))
             )
             txt_lines.append("\n")
 
         text_download = "".join(txt_lines)
+
 
         # ----------------------------------------------------
         # SELF-CONTAINED HTML EXPORT
@@ -1293,7 +1485,9 @@ with st.sidebar:
 
         for message in current_export.get("messages", []):
 
-            is_user = message.get("role") == "user"
+            is_user = (
+                message.get("role") == "user"
+            )
 
             role = (
                 "You"
@@ -1319,8 +1513,13 @@ with st.sidebar:
             html_parts.append(
                 f"""
                 <div class="message {css_class}">
-                    <div class="role">{role}</div>
-                    <div class="content">{content}</div>
+                    <div class="role">
+                        {role}
+                    </div>
+
+                    <div class="content">
+                        {content}
+                    </div>
                 </div>
                 """
             )
@@ -1358,8 +1557,10 @@ with st.sidebar:
         )
 
         st.caption(
-            "TXT works everywhere. HTML keeps conversation formatting."
+            "TXT is the most universal format. "
+            "HTML keeps headings and conversation formatting."
         )
+
 
     # --------------------------------------------------------
     # DELETE ALL
@@ -1373,7 +1574,9 @@ with st.sidebar:
         delete_all()
         st.rerun()
 
+
     st.divider()
+
 
     # ========================================================
     # AI SETTINGS
@@ -1429,18 +1632,30 @@ with st.sidebar:
 
             st.rerun()
 
-    st.caption(f"Primary: {PRIMARY_MODEL}")
-    st.caption(f"Fallback: {BACKUP_MODEL}")
-    st.caption("☁️ Chats stored in Supabase")
+
+    st.caption(
+        f"Primary: {PRIMARY_MODEL}"
+    )
+
+    st.caption(
+        f"Fallback: {BACKUP_MODEL}"
+    )
+
+    st.caption(
+        "☁️ Chats stored in Supabase"
+    )
 
 
 # ============================================================
-# MAIN APPLICATION BRANDING
+# MAIN APPLICATION BRANDING — UI ONLY
 # ============================================================
 
-c1, c2 = st.columns([1, 12])
+brand_col1, brand_col2 = st.columns(
+    [0.75, 11.25],
+    gap="small",
+)
 
-with c1:
+with brand_col1:
 
     if LOGO_PATH.exists():
 
@@ -1453,15 +1668,16 @@ with c1:
 
         st.markdown("⚡")
 
-with c2:
+
+with brand_col2:
 
     st.markdown(
         """
-        <div class="app-brand-name">
+        <div class="main-brand-name">
             RacharlaGPT
         </div>
 
-        <div class="app-subtitle">
+        <div class="main-brand-subtitle">
             Fast, intelligent AI conversations powered by Groq
         </div>
         """,
@@ -1541,6 +1757,7 @@ if user_input:
             }
         )
 
+
         # ----------------------------------------------------
         # Automatic title
         # ----------------------------------------------------
@@ -1551,6 +1768,7 @@ if user_input:
                 user_input
             )
 
+
         # ----------------------------------------------------
         # Display user message
         # ----------------------------------------------------
@@ -1560,6 +1778,7 @@ if user_input:
             st.markdown(
                 user_input
             )
+
 
         # ----------------------------------------------------
         # Generate answer
@@ -1578,7 +1797,6 @@ if user_input:
                 answer = response.content
 
                 if not isinstance(answer, str):
-
                     answer = str(answer)
 
                 st.markdown(answer)
@@ -1589,6 +1807,7 @@ if user_input:
                         "Primary model was rate-limited; "
                         f"answered with {BACKUP_MODEL}."
                     )
+
 
             # ------------------------------------------------
             # Save assistant response
@@ -1603,6 +1822,7 @@ if user_input:
 
             save_chat(chat)
 
+
         except RateLimitError:
 
             with st.chat_message("assistant"):
@@ -1614,6 +1834,7 @@ if user_input:
                 )
 
             chat["messages"].pop()
+
 
         except Exception as exc:
 

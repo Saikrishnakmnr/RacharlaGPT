@@ -138,12 +138,10 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 # ============================================================
 
 if "supabase_client" not in st.session_state:
-
     st.session_state.supabase_client = create_client(
         SUPABASE_URL,
         SUPABASE_KEY,
     )
-
 
 supabase: Client = st.session_state.supabase_client
 
@@ -153,18 +151,13 @@ supabase: Client = st.session_state.supabase_client
 # ============================================================
 
 def current_india_datetime():
-
     try:
-        return datetime.now(
-            ZoneInfo("Asia/Kolkata")
-        )
-
+        return datetime.now(ZoneInfo("Asia/Kolkata"))
     except Exception:
         return datetime.now(timezone.utc)
 
 
 def date_context():
-
     now = current_india_datetime()
 
     return (
@@ -176,15 +169,23 @@ def date_context():
 
 
 # ============================================================
-# CSS
+# CSS — POLISHED UI
 # ============================================================
 
 st.markdown(
     """
     <style>
 
+    /* ========================================================
+       GLOBAL
+       ======================================================== */
+
     .stApp {
         background: #ffffff;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(255,255,255,0.96);
     }
 
     section[data-testid="stSidebar"] {
@@ -192,74 +193,93 @@ st.markdown(
         border-right: 1px solid #e7e9ef;
     }
 
-    /* ========================================================
-       LOGIN PAGE
-       ======================================================== */
-
-    .auth-wrapper {
-        width: 100%;
-        max-width: 850px;
-        margin: 25px auto 20px auto;
-        text-align: center;
+    .block-container {
+        padding-top: 1.4rem;
+        padding-bottom: 1rem;
     }
 
-    .auth-title {
-        font-size: 31px;
+
+    /* ========================================================
+       LOGIN / AUTH PAGE
+       ======================================================== */
+
+    .auth-page-title {
+        font-size: 32px;
+        font-weight: 800;
+        line-height: 1.15;
+        color: #172033;
+        margin: 0;
+        letter-spacing: -0.8px;
+    }
+
+    .auth-page-subtitle {
+        color: #6b7280;
+        font-size: 14px;
+        line-height: 1.55;
+        margin-top: 7px;
+        margin-bottom: 18px;
+    }
+
+    .auth-small-note {
+        color: #8a91a1;
+        font-size: 12px;
+        line-height: 1.5;
+        margin-top: 10px;
+    }
+
+    .auth-hero-title {
+        font-size: 24px;
         font-weight: 800;
         color: #172033;
         margin-top: 12px;
+        margin-bottom: 4px;
     }
 
-    .auth-subtitle {
-        color: #6b7280;
-        font-size: 15px;
-        margin-top: 5px;
-        margin-bottom: 25px;
+    .auth-hero-text {
+        color: #687083;
+        font-size: 14px;
+        line-height: 1.6;
+        max-width: 560px;
+        margin-bottom: 12px;
     }
 
-    .auth-logo {
-        width: 105px;
-        height: 105px;
-        object-fit: contain;
-        border-radius: 50%;
+    .auth-badge {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: #eef4ff;
+        color: #2457c5;
+        font-size: 12px;
+        font-weight: 700;
+        margin-top: 4px;
     }
 
-    .auth-banner {
-        display: block;
+    /* Keep Streamlit image compact on auth page */
+    .auth-banner-wrap {
+        display: flex;
+        justify-content: center;
         width: 100%;
-        max-width: 887px;
-        height: auto;
-        margin: 18px auto 25px auto;
-        border-radius: 18px;
     }
-
 
     /* ========================================================
        MAIN BRANDING
        ======================================================== */
-
-    .app-brand {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-top: 5px;
-        margin-bottom: 2px;
-    }
 
     .app-brand-name {
         font-size: 30px;
         font-weight: 800;
         color: #172033;
         letter-spacing: -1px;
+        line-height: 1.1;
+        margin-top: 2px;
     }
 
     .app-subtitle {
         color: #6b7280;
         font-size: 14px;
-        margin-left: 58px;
-        margin-bottom: 20px;
+        margin-top: 3px;
+        margin-bottom: 10px;
     }
-
 
     /* ========================================================
        WELCOME
@@ -268,7 +288,7 @@ st.markdown(
     .welcome-box {
         width: 100%;
         max-width: 850px;
-        margin: 7vh auto 3vh auto;
+        margin: 9vh auto 3vh auto;
         text-align: center;
         padding: 20px;
     }
@@ -286,36 +306,29 @@ st.markdown(
         margin: 10px auto;
     }
 
-
     /* ========================================================
        MOBILE
        ======================================================== */
 
     @media (max-width: 700px) {
 
-        .auth-wrapper {
-            width: 100%;
-            margin-top: 5px;
+        .block-container {
+            padding-top: 0.8rem;
+            padding-left: 0.75rem;
+            padding-right: 0.75rem;
         }
 
-        .auth-logo {
-            width: 80px;
-            height: 80px;
+        .auth-page-title {
+            font-size: 27px;
         }
 
-        .auth-banner {
-            width: 100%;
-            height: auto;
-            border-radius: 10px;
-            margin-top: 12px;
+        .auth-hero-title {
+            font-size: 21px;
         }
 
-        .auth-title {
-            font-size: 25px;
-        }
-
-        .auth-subtitle {
-            font-size: 14px;
+        .auth-page-subtitle,
+        .auth-hero-text {
+            font-size: 13px;
         }
 
         .app-brand-name {
@@ -323,8 +336,11 @@ st.markdown(
         }
 
         .app-subtitle {
-            margin-left: 0;
             font-size: 13px;
+        }
+
+        .welcome-box {
+            margin-top: 5vh;
         }
 
         .welcome-title {
@@ -348,54 +364,93 @@ st.markdown(
 
 def show_auth():
 
-    st.markdown(
-        '<div class="auth-wrapper">',
-        unsafe_allow_html=True,
+    # --------------------------------------------------------
+    # Desktop: compact two-column login experience.
+    # Mobile: Streamlit automatically stacks the columns.
+    # This prevents the banner from pushing the login far down.
+    # --------------------------------------------------------
+
+    left, right = st.columns(
+        [1.25, 0.9],
+        gap="large",
     )
-
-    # Logo
-    if LOGO_PATH.exists():
-
-        st.image(
-            str(LOGO_PATH),
-            width=105,
-        )
-
-    # Banner
-    if BANNER_PATH.exists():
-
-        st.image(
-            str(BANNER_PATH),
-            use_container_width=True,
-        )
-
-    # Branding
-    st.markdown(
-        """
-        <div class="auth-title">
-            RacharlaGPT
-        </div>
-
-        <div class="auth-subtitle">
-            Sign in to save your conversations permanently.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
 
     # ========================================================
-    # AUTH TABS
+    # LEFT — BRAND / BANNER
     # ========================================================
 
-    _, center, _ = st.columns([1, 2, 1])
+    with left:
 
-    with center:
+        if LOGO_PATH.exists():
+            logo_col1, logo_col2, logo_col3 = st.columns(
+                [1, 1.5, 1]
+            )
+
+            with logo_col2:
+                st.image(
+                    str(LOGO_PATH),
+                    width=82,
+                )
+
+        st.markdown(
+            '<div class="auth-hero-title">RacharlaGPT</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            '<div class="auth-hero-text">'
+            'A practical AI assistant for learning, coding, '
+            'ideas, research, and everyday questions.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            '<span class="auth-badge">⚡ Fast AI • ☁️ Saved Chats</span>',
+            unsafe_allow_html=True,
+        )
+
+        st.write("")
+
+        if BANNER_PATH.exists():
+            st.markdown(
+                '<div class="auth-banner-wrap">',
+                unsafe_allow_html=True,
+            )
+
+            st.image(
+                str(BANNER_PATH),
+                width=560,
+            )
+
+            st.markdown(
+                '</div>',
+                unsafe_allow_html=True,
+            )
+
+        else:
+            st.info(
+                "Banner image not found. "
+                "Check assets/manatechsaavy_banner.jfif."
+            )
+
+    # ========================================================
+    # RIGHT — LOGIN CARD
+    # ========================================================
+
+    with right:
+
+        st.markdown(
+            '<div class="auth-page-title">Welcome back 👋</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            '<div class="auth-page-subtitle">'
+            'Sign in to save and access your conversations permanently.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         login_tab, signup_tab = st.tabs(
             [
@@ -403,7 +458,6 @@ def show_auth():
                 "✨ Create Account",
             ]
         )
-
 
         # ====================================================
         # SIGN IN
@@ -416,12 +470,14 @@ def show_auth():
                 email = st.text_input(
                     "Email",
                     key="login_email",
+                    placeholder="you@example.com",
                 )
 
                 password = st.text_input(
                     "Password",
                     type="password",
                     key="login_password",
+                    placeholder="Enter your password",
                 )
 
                 submit = st.form_submit_button(
@@ -429,7 +485,6 @@ def show_auth():
                     type="primary",
                     use_container_width=True,
                 )
-
 
             if submit:
 
@@ -453,7 +508,6 @@ def show_auth():
                             )
                         )
 
-
                         if result.user and result.session:
 
                             st.session_state.auth_user = (
@@ -469,13 +523,18 @@ def show_auth():
                                 "Please check your email and password."
                             )
 
-
                     except Exception as exc:
 
                         st.error(
                             f"Sign in failed: {exc}"
                         )
 
+            st.markdown(
+                '<div class="auth-small-note">'
+                'Your chat history is stored securely in Supabase.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
         # ====================================================
         # CREATE ACCOUNT
@@ -488,18 +547,21 @@ def show_auth():
                 email = st.text_input(
                     "Email",
                     key="signup_email",
+                    placeholder="you@example.com",
                 )
 
                 password = st.text_input(
                     "Password",
                     type="password",
                     key="signup_password",
+                    placeholder="At least 6 characters",
                 )
 
                 confirm = st.text_input(
                     "Confirm password",
                     type="password",
                     key="signup_confirm",
+                    placeholder="Repeat your password",
                 )
 
                 submit = st.form_submit_button(
@@ -507,7 +569,6 @@ def show_auth():
                     type="primary",
                     use_container_width=True,
                 )
-
 
             if submit:
 
@@ -540,7 +601,6 @@ def show_auth():
                             }
                         )
 
-
                         if result.session and result.user:
 
                             st.session_state.auth_user = (
@@ -556,7 +616,6 @@ def show_auth():
                                 "You can now sign in."
                             )
 
-
                     except Exception as exc:
 
                         st.error(
@@ -567,23 +626,14 @@ def show_auth():
 # ============================================================
 # AUTH GATE
 # ============================================================
-#
-# THIS IS IMPORTANT.
-#
-# A completely new Streamlit browser session has no auth_user.
-# Therefore it MUST show Sign In / Create Account.
-#
-# ============================================================
 
 if "auth_user" not in st.session_state:
 
     show_auth()
-
     st.stop()
 
 
 auth_user = st.session_state.auth_user
-
 USER_ID = str(auth_user.id)
 
 
@@ -619,41 +669,24 @@ primary_llm, backup_llm = get_models(
 # ============================================================
 
 if "system_prompt" not in st.session_state:
-
-    st.session_state.system_prompt = (
-        DEFAULT_SYSTEM_PROMPT
-    )
-
+    st.session_state.system_prompt = DEFAULT_SYSTEM_PROMPT
 
 if "chats" not in st.session_state:
-
     st.session_state.chats = {}
 
-
 if "current_chat_id" not in st.session_state:
-
     st.session_state.current_chat_id = None
 
-
 if "loaded_from_supabase" not in st.session_state:
-
     st.session_state.loaded_from_supabase = False
 
-
 if "search" not in st.session_state:
-
     st.session_state.search = ""
 
-
 if "selected_model" not in st.session_state:
-
-    st.session_state.selected_model = (
-        "Auto (recommended)"
-    )
-
+    st.session_state.selected_model = "Auto (recommended)"
 
 if "temperature" not in st.session_state:
-
     st.session_state.temperature = 0.7
 
 
@@ -663,9 +696,7 @@ if "temperature" not in st.session_state:
 
 def blank_chat():
 
-    now = datetime.now(
-        timezone.utc
-    ).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     return {
         "id": str(uuid.uuid4()),
@@ -701,9 +732,6 @@ def load_chats():
             "updated_at": row.get("updated_at"),
         }
 
-
-    # Create first chat for a new account
-
     if not chats:
 
         chat = blank_chat()
@@ -717,15 +745,12 @@ def load_chats():
 
         chats[chat["id"]] = chat
 
-
     return chats
 
 
 def save_chat(chat):
 
-    now = datetime.now(
-        timezone.utc
-    ).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     (
         supabase
@@ -757,7 +782,6 @@ def create_chat():
     )
 
     st.session_state.chats[chat["id"]] = chat
-
     st.session_state.current_chat_id = chat["id"]
 
 
@@ -777,7 +801,6 @@ def delete_chat(chat_id):
         None,
     )
 
-
     if not st.session_state.chats:
 
         create_chat()
@@ -790,9 +813,7 @@ def delete_chat(chat_id):
             reverse=True,
         )
 
-        st.session_state.current_chat_id = (
-            ordered[0]["id"]
-        )
+        st.session_state.current_chat_id = ordered[0]["id"]
 
 
 def delete_all():
@@ -806,25 +827,17 @@ def delete_all():
     )
 
     st.session_state.chats = {}
-
     create_chat()
 
 
 def title_for(text):
 
-    text = " ".join(
-        text.strip().split()
-    )
+    text = " ".join(text.strip().split())
 
     if len(text) <= 34:
-
         return text
 
-    return (
-        text[:34]
-        .rstrip()
-        + "…"
-    )
+    return text[:34].rstrip() + "…"
 
 
 def current_chat():
@@ -847,13 +860,7 @@ def current_chat():
 
 def ask(chat):
 
-    recent = chat["messages"][
-        -MAX_CONTEXT_MESSAGES:
-    ]
-
-
-    # Dynamic date/time information is supplied every time
-    # the AI answers a question.
+    recent = chat["messages"][-MAX_CONTEXT_MESSAGES:]
 
     system_content = (
         st.session_state.system_prompt
@@ -862,13 +869,9 @@ def ask(chat):
         + date_context()
     )
 
-
     msgs = [
-        SystemMessage(
-            content=system_content
-        )
+        SystemMessage(content=system_content)
     ]
-
 
     for message in recent:
 
@@ -888,15 +891,11 @@ def ask(chat):
                 )
             )
 
+    selected = st.session_state.selected_model
 
-    selected = (
-        st.session_state.selected_model
-    )
-
-
-    # ========================================================
+    # --------------------------------------------------------
     # PRIMARY ONLY
-    # ========================================================
+    # --------------------------------------------------------
 
     if selected == PRIMARY_MODEL:
 
@@ -908,10 +907,7 @@ def ask(chat):
                 api_key=GROQ_API_KEY,
             )
 
-            return (
-                llm.invoke(msgs),
-                "primary",
-            )
+            return llm.invoke(msgs), "primary"
 
         except RateLimitError:
 
@@ -921,15 +917,11 @@ def ask(chat):
                 api_key=GROQ_API_KEY,
             )
 
-            return (
-                llm.invoke(msgs),
-                "backup",
-            )
+            return llm.invoke(msgs), "backup"
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # BACKUP ONLY
-    # ========================================================
+    # --------------------------------------------------------
 
     if selected == BACKUP_MODEL:
 
@@ -939,15 +931,11 @@ def ask(chat):
             api_key=GROQ_API_KEY,
         )
 
-        return (
-            llm.invoke(msgs),
-            "backup",
-        )
+        return llm.invoke(msgs), "backup"
 
-
-    # ========================================================
+    # --------------------------------------------------------
     # AUTO
-    # ========================================================
+    # --------------------------------------------------------
 
     try:
 
@@ -957,10 +945,7 @@ def ask(chat):
             api_key=GROQ_API_KEY,
         )
 
-        return (
-            llm.invoke(msgs),
-            "primary",
-        )
+        return llm.invoke(msgs), "primary"
 
     except RateLimitError:
 
@@ -970,10 +955,7 @@ def ask(chat):
             api_key=GROQ_API_KEY,
         )
 
-        return (
-            llm.invoke(msgs),
-            "backup",
-        )
+        return llm.invoke(msgs), "backup"
 
 
 # ============================================================
@@ -993,13 +975,9 @@ if not st.session_state.loaded_from_supabase:
         )
 
         if ordered:
-
-            st.session_state.current_chat_id = (
-                ordered[0]["id"]
-            )
+            st.session_state.current_chat_id = ordered[0]["id"]
 
         st.session_state.loaded_from_supabase = True
-
 
     except Exception as exc:
 
@@ -1007,10 +985,7 @@ if not st.session_state.loaded_from_supabase:
             "Could not load chats from Supabase."
         )
 
-        st.code(
-            str(exc)
-        )
-
+        st.code(str(exc))
         st.stop()
 
 
@@ -1044,7 +1019,6 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-
     # --------------------------------------------------------
     # NEW CHAT
     # --------------------------------------------------------
@@ -1056,9 +1030,7 @@ with st.sidebar:
     ):
 
         create_chat()
-
         st.rerun()
-
 
     # --------------------------------------------------------
     # ACCOUNT
@@ -1074,7 +1046,6 @@ with st.sidebar:
         f"Signed in: {user_email}"
     )
 
-
     # --------------------------------------------------------
     # SIGN OUT
     # --------------------------------------------------------
@@ -1085,13 +1056,9 @@ with st.sidebar:
     ):
 
         try:
-
             supabase.auth.sign_out()
-
         except Exception:
-
             pass
-
 
         for key in [
             "auth_user",
@@ -1107,14 +1074,9 @@ with st.sidebar:
                 None,
             )
 
-
         st.rerun()
 
-
-    st.markdown(
-        "### YOUR CHATS"
-    )
-
+    st.markdown("### YOUR CHATS")
 
     # --------------------------------------------------------
     # SEARCH
@@ -1128,7 +1090,6 @@ with st.sidebar:
 
     st.session_state.search = search
 
-
     # --------------------------------------------------------
     # RENAME
     # --------------------------------------------------------
@@ -1138,9 +1099,7 @@ with st.sidebar:
         in st.session_state.chats
     ):
 
-        with st.expander(
-            "✏️ Rename current chat"
-        ):
+        with st.expander("✏️ Rename current chat"):
 
             rename_value = st.text_input(
                 "Chat name",
@@ -1149,7 +1108,6 @@ with st.sidebar:
                 ]["title"],
                 key="rename_chat_title",
             )
-
 
             if st.button(
                 "Save name",
@@ -1160,23 +1118,16 @@ with st.sidebar:
                     rename_value.strip().split()
                 )
 
-
                 if rename_value:
 
-                    current = (
-                        st.session_state.chats[
-                            st.session_state.current_chat_id
-                        ]
-                    )
+                    current = st.session_state.chats[
+                        st.session_state.current_chat_id
+                    ]
 
-                    current["title"] = (
-                        rename_value[:80]
-                    )
+                    current["title"] = rename_value[:80]
 
                     save_chat(current)
-
                     st.rerun()
-
 
     # --------------------------------------------------------
     # CHAT LIST
@@ -1187,7 +1138,6 @@ with st.sidebar:
         key=lambda x: x[1].get("updated_at") or "",
         reverse=True,
     )
-
 
     for chat_id, item in ordered:
 
@@ -1204,16 +1154,10 @@ with st.sidebar:
             )
         )
 
-
         if not matches:
-
             continue
 
-
-        c1, c2 = st.columns(
-            [4, 1]
-        )
-
+        c1, c2 = st.columns([4, 1])
 
         with c1:
 
@@ -1223,12 +1167,8 @@ with st.sidebar:
                 use_container_width=True,
             ):
 
-                st.session_state.current_chat_id = (
-                    chat_id
-                )
-
+                st.session_state.current_chat_id = chat_id
                 st.rerun()
-
 
         with c2:
 
@@ -1239,12 +1179,9 @@ with st.sidebar:
             ):
 
                 delete_chat(chat_id)
-
                 st.rerun()
 
-
     st.divider()
-
 
     # ========================================================
     # DOWNLOAD
@@ -1254,7 +1191,6 @@ with st.sidebar:
         st.session_state.current_chat_id
     )
 
-
     if current_export:
 
         title = (
@@ -1262,32 +1198,13 @@ with st.sidebar:
             or "RacharlaGPT Chat"
         )
 
+        txt_lines = [
+            f"{title}\n",
+            "RacharlaGPT Conversation\n",
+            "=" * 50 + "\n",
+        ]
 
-        # ----------------------------------------------------
-        # PLAIN TEXT
-        # Works on practically every phone/computer.
-        # ----------------------------------------------------
-
-        txt_lines = []
-
-        txt_lines.append(
-            f"{title}\n"
-        )
-
-        txt_lines.append(
-            "RacharlaGPT Conversation\n"
-        )
-
-        txt_lines.append(
-            "=" * 50
-            + "\n"
-        )
-
-
-        for message in current_export.get(
-            "messages",
-            [],
-        ):
+        for message in current_export.get("messages", []):
 
             role = (
                 "You"
@@ -1295,15 +1212,8 @@ with st.sidebar:
                 else "RacharlaGPT"
             )
 
-            txt_lines.append(
-                f"\n{role}\n"
-            )
-
-            txt_lines.append(
-                "-" * 30
-                + "\n"
-            )
-
+            txt_lines.append(f"\n{role}\n")
+            txt_lines.append("-" * 30 + "\n")
             txt_lines.append(
                 str(
                     message.get(
@@ -1312,24 +1222,12 @@ with st.sidebar:
                     )
                 )
             )
+            txt_lines.append("\n")
 
-            txt_lines.append(
-                "\n"
-            )
-
-
-        text_download = "".join(
-            txt_lines
-        )
-
+        text_download = "".join(txt_lines)
 
         # ----------------------------------------------------
-        # SELF-CONTAINED HTML
-        #
-        # Opens nicely in Android, iPhone, Windows,
-        # Mac and browsers.
-        #
-        # No internet connection required.
+        # SELF-CONTAINED HTML EXPORT
         # ----------------------------------------------------
 
         html_parts = [
@@ -1393,15 +1291,9 @@ with st.sidebar:
             f"<h1>{escape(title)}</h1>",
         ]
 
+        for message in current_export.get("messages", []):
 
-        for message in current_export.get(
-            "messages",
-            [],
-        ):
-
-            is_user = (
-                message.get("role") == "user"
-            )
+            is_user = message.get("role") == "user"
 
             role = (
                 "You"
@@ -1424,21 +1316,14 @@ with st.sidebar:
                 )
             )
 
-
             html_parts.append(
                 f"""
                 <div class="message {css_class}">
-                    <div class="role">
-                        {role}
-                    </div>
-
-                    <div class="content">
-                        {content}
-                    </div>
+                    <div class="role">{role}</div>
+                    <div class="content">{content}</div>
                 </div>
                 """
             )
-
 
         html_parts.extend(
             [
@@ -1452,44 +1337,29 @@ with st.sidebar:
             ]
         )
 
+        html_download = "".join(html_parts)
 
-        html_download = "".join(
-            html_parts
-        )
-
-
-        st.markdown(
-            "### 📥 Download"
-        )
-
+        st.markdown("### 📥 Download")
 
         st.download_button(
             "📄 Download TXT",
             data=text_download,
-            file_name=(
-                f"{title[:45]}.txt"
-            ),
+            file_name=f"{title[:45]}.txt",
             mime="text/plain",
             use_container_width=True,
         )
 
-
         st.download_button(
             "🌐 Download HTML",
             data=html_download,
-            file_name=(
-                f"{title[:45]}.html"
-            ),
+            file_name=f"{title[:45]}.html",
             mime="text/html",
             use_container_width=True,
         )
 
-
         st.caption(
-            "TXT is the most universal format. "
-            "HTML keeps headings and conversation formatting."
+            "TXT works everywhere. HTML keeps conversation formatting."
         )
-
 
     # --------------------------------------------------------
     # DELETE ALL
@@ -1501,12 +1371,9 @@ with st.sidebar:
     ):
 
         delete_all()
-
         st.rerun()
 
-
     st.divider()
-
 
     # ========================================================
     # AI SETTINGS
@@ -1517,44 +1384,33 @@ with st.sidebar:
         expanded=False,
     ):
 
-        st.session_state.selected_model = (
-            st.selectbox(
-                "Model",
-                MODEL_OPTIONS,
-                index=MODEL_OPTIONS.index(
-                    st.session_state.selected_model
-                ),
-            )
+        st.session_state.selected_model = st.selectbox(
+            "Model",
+            MODEL_OPTIONS,
+            index=MODEL_OPTIONS.index(
+                st.session_state.selected_model
+            ),
         )
 
-
-        st.session_state.temperature = (
-            st.slider(
-                "Creativity",
-                min_value=0.0,
-                max_value=1.2,
-                value=float(
-                    st.session_state.temperature
-                ),
-                step=0.1,
-                help=(
-                    "Lower = more focused. "
-                    "Higher = more creative."
-                ),
-            )
+        st.session_state.temperature = st.slider(
+            "Creativity",
+            min_value=0.0,
+            max_value=1.2,
+            value=float(
+                st.session_state.temperature
+            ),
+            step=0.1,
+            help=(
+                "Lower = more focused. "
+                "Higher = more creative."
+            ),
         )
 
-
-        st.session_state.system_prompt = (
-            st.text_area(
-                "AI System Prompt",
-                value=(
-                    st.session_state.system_prompt
-                ),
-                height=170,
-            )
+        st.session_state.system_prompt = st.text_area(
+            "AI System Prompt",
+            value=st.session_state.system_prompt,
+            height=170,
         )
-
 
         if st.button(
             "↩️ Reset AI Settings",
@@ -1573,28 +1429,16 @@ with st.sidebar:
 
             st.rerun()
 
-
-    st.caption(
-        f"Primary: {PRIMARY_MODEL}"
-    )
-
-    st.caption(
-        f"Fallback: {BACKUP_MODEL}"
-    )
-
-    st.caption(
-        "☁️ Chats stored in Supabase"
-    )
+    st.caption(f"Primary: {PRIMARY_MODEL}")
+    st.caption(f"Fallback: {BACKUP_MODEL}")
+    st.caption("☁️ Chats stored in Supabase")
 
 
 # ============================================================
 # MAIN APPLICATION BRANDING
 # ============================================================
 
-c1, c2 = st.columns(
-    [1, 12]
-)
-
+c1, c2 = st.columns([1, 12])
 
 with c1:
 
@@ -1607,10 +1451,7 @@ with c1:
 
     else:
 
-        st.markdown(
-            "⚡"
-        )
-
+        st.markdown("⚡")
 
 with c2:
 
@@ -1667,9 +1508,7 @@ if not chat["messages"]:
 
 for message in chat["messages"]:
 
-    with st.chat_message(
-        message["role"]
-    ):
+    with st.chat_message(message["role"]):
 
         st.markdown(
             message["content"]
@@ -1689,7 +1528,6 @@ if user_input:
 
     user_input = user_input.strip()
 
-
     if user_input:
 
         # ----------------------------------------------------
@@ -1703,7 +1541,6 @@ if user_input:
             }
         )
 
-
         # ----------------------------------------------------
         # Automatic title
         # ----------------------------------------------------
@@ -1713,7 +1550,6 @@ if user_input:
             chat["title"] = title_for(
                 user_input
             )
-
 
         # ----------------------------------------------------
         # Display user message
@@ -1725,43 +1561,27 @@ if user_input:
                 user_input
             )
 
-
         # ----------------------------------------------------
         # Generate answer
         # ----------------------------------------------------
 
         try:
 
-            with st.chat_message(
-                "assistant"
-            ):
+            with st.chat_message("assistant"):
 
                 with st.spinner(
                     "RacharlaGPT is thinking…"
                 ):
 
-                    response, used = ask(
-                        chat
-                    )
-
+                    response, used = ask(chat)
 
                 answer = response.content
 
+                if not isinstance(answer, str):
 
-                if not isinstance(
-                    answer,
-                    str,
-                ):
+                    answer = str(answer)
 
-                    answer = str(
-                        answer
-                    )
-
-
-                st.markdown(
-                    answer
-                )
-
+                st.markdown(answer)
 
                 if used == "backup":
 
@@ -1769,7 +1589,6 @@ if user_input:
                         "Primary model was rate-limited; "
                         f"answered with {BACKUP_MODEL}."
                     )
-
 
             # ------------------------------------------------
             # Save assistant response
@@ -1782,17 +1601,11 @@ if user_input:
                 }
             )
 
-
-            save_chat(
-                chat
-            )
-
+            save_chat(chat)
 
         except RateLimitError:
 
-            with st.chat_message(
-                "assistant"
-            ):
+            with st.chat_message("assistant"):
 
                 st.warning(
                     "Groq rate limit reached. "
@@ -1800,28 +1613,18 @@ if user_input:
                     "and try again."
                 )
 
-
-            # Remove unsaved user message
-
             chat["messages"].pop()
-
 
         except Exception as exc:
 
-            with st.chat_message(
-                "assistant"
-            ):
+            with st.chat_message("assistant"):
 
                 st.error(
                     "Something went wrong while "
                     "contacting Groq. Please try again."
                 )
 
-
-            # Remove unsaved user message
-
             chat["messages"].pop()
-
 
             print(
                 "RacharlaGPT error:",

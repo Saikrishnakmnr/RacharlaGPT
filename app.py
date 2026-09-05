@@ -356,6 +356,22 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
+
+    # Safe export: creates a local Markdown copy of the current conversation.
+    current_export = st.session_state.chats.get(st.session_state.current_chat_id)
+    if current_export:
+        export_lines = [f"# {current_export['title']}\n"]
+        for msg in current_export.get("messages", []):
+            role = "You" if msg.get("role") == "user" else "RacharlaGPT"
+            export_lines.append(f"## {role}\n\n{msg.get('content', '')}\n")
+        st.download_button(
+            "⬇️ Download Chat",
+            data="\n".join(export_lines),
+            file_name=f"{current_export['title'][:50] or 'chat'}.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
     if st.button("🗑️ Delete All Chats", use_container_width=True):
         delete_all()
         st.rerun()

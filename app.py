@@ -1,9 +1,9 @@
 import os
 import uuid
-import base64
 from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from html import escape
 
 import streamlit as st
 from groq import RateLimitError
@@ -13,19 +13,8 @@ from supabase import create_client, Client
 
 
 # ============================================================
-# RACHARLAGPT
-# Stable version:
-# - Supabase authentication
-# - Permanent chat history
-# - Responsive logo/banner
-# - Chat search
-# - Rename
-# - Delete
-# - Download .txt
-# - Current date/day awareness
-# - Groq primary/fallback
+# PAGE CONFIG
 # ============================================================
-
 
 st.set_page_config(
     page_title="RacharlaGPT",
@@ -36,7 +25,7 @@ st.set_page_config(
 
 
 # ============================================================
-# APP CONFIGURATION
+# APP CONFIG
 # ============================================================
 
 APP_NAME = "RacharlaGPT"
@@ -54,91 +43,40 @@ MODEL_OPTIONS = [
 
 
 DEFAULT_SYSTEM_PROMPT = """
-You are RacharlaGPT, a helpful, intelligent, friendly and concise AI assistant.
+You are RacharlaGPT, a helpful, intelligent, friendly and practical AI assistant.
 
 IMPORTANT BEHAVIOR:
 
-1. Always understand the user's intended meaning, even when there are:
-   - spelling mistakes
-   - typing mistakes
-   - grammar mistakes
-   - missing words
-   - informal language
-
-2. Do not stop answering just because the user has spelling mistakes.
-   Infer the intended word from context and answer normally.
-
-3. If a spelling correction is important, briefly mention the correction,
-   but do not make the user repeat the question.
-
-4. For questions involving today, tomorrow, yesterday, this week,
-   day of the week, dates or current time:
-   use the current date information supplied by the application.
-
-5. Give accurate, clear and useful answers.
-
-6. Use headings, bullet points, numbered steps and tables when they improve
-   readability.
-
-7. If the user asks for code, provide complete working code and briefly
-   explain important changes.
-
-8. Do not invent facts. If uncertain, clearly say so.
-
-9. Be practical and solution-oriented.
-
-10. Answer the user's actual question directly.
+1. Answer the user's actual question directly.
+2. If the user makes an obvious spelling mistake, typo, or phonetic mistake,
+   understand the intended meaning and answer instead of stopping.
+3. If a word is ambiguous and could have multiple meanings, briefly explain
+   your interpretation and continue helping.
+4. When the user asks "today", "tomorrow", "yesterday", "what day is it",
+   "day of the week", "date today", or similar questions, use the current
+   date and weekday supplied in the system context.
+5. Never invent a special day, holiday, festival, observance, anniversary,
+   or historical event. If the user asks about a "speciality" of today and
+   there is no reliable information available in the supplied context,
+   clearly say that there is no confirmed major observance rather than
+   making something up.
+6. If the user asks about today's date/day, give the exact date and weekday.
+7. Use headings, bullet points, numbered steps and tables when useful.
+8. If the user asks for code, provide complete working code.
+9. Explain important code changes briefly.
+10. Be concise for simple questions and detailed when the user needs detail.
+11. If something is uncertain, say so clearly.
+12. Do not stop answering merely because the user's spelling is imperfect.
+13. Understand Indian English and common conversational spelling variations.
+14. Be practical and solution-oriented.
 """
 
 
 # ============================================================
-# CURRENT DATE / TIME
-# ============================================================
-
-def get_current_time():
-    """
-    Uses India Standard Time for reliable date/day answers.
-    """
-
-    try:
-        return datetime.now(ZoneInfo("Asia/Kolkata"))
-    except Exception:
-        return datetime.now(timezone.utc)
-
-
-CURRENT_TIME = get_current_time()
-
-CURRENT_DATE_TEXT = CURRENT_TIME.strftime("%A, %d %B %Y")
-CURRENT_TIME_TEXT = CURRENT_TIME.strftime("%I:%M %p")
-
-DATE_CONTEXT = f"""
-CURRENT DATE AND TIME INFORMATION
-
-Today is: {CURRENT_DATE_TEXT}
-Current time: {CURRENT_TIME_TEXT} IST
-
-When the user asks:
-- What day is today?
-- Today's date?
-- Today special?
-- What is today?
-- What day of the week?
-- Tomorrow?
-- Yesterday?
-
-Use the current date above.
-
-The user may make spelling or grammar mistakes.
-Always infer the intended meaning and continue answering.
-"""
-
-
-# ============================================================
-# PATHS / ASSETS
+# FILE PATHS
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
-
 ASSETS_DIR = BASE_DIR / "assets"
 
 LOGO_PATH = ASSETS_DIR / "manatechsaavy_logo.png"
@@ -146,7 +84,7 @@ BANNER_PATH = ASSETS_DIR / "manatechsaavy_banner.jfif"
 
 
 # ============================================================
-# SECRET HELPER
+# SECRETS
 # ============================================================
 
 def get_secret(name):
@@ -180,8 +118,8 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     st.error("Supabase is not configured.")
 
     st.info(
-        "Open Streamlit Cloud → Manage app → Settings → Secrets "
-        "and make sure SUPABASE_URL and SUPABASE_KEY exist."
+        "Add SUPABASE_URL and SUPABASE_KEY in "
+        "Streamlit Cloud → Manage app → Settings → Secrets."
     )
 
     st.stop()
@@ -189,12 +127,6 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 if not GROQ_API_KEY:
     st.error("GROQ_API_KEY is not configured.")
-
-    st.info(
-        "Open Streamlit Cloud → Manage app → Settings → Secrets "
-        "and make sure GROQ_API_KEY exists."
-    )
-
     st.stop()
 
 
@@ -206,6 +138,7 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 # ============================================================
 
 if "supabase_client" not in st.session_state:
+
     st.session_state.supabase_client = create_client(
         SUPABASE_URL,
         SUPABASE_KEY,
@@ -216,232 +149,115 @@ supabase: Client = st.session_state.supabase_client
 
 
 # ============================================================
-# IMAGE HELPERS
+# INDIA DATE / TIME CONTEXT
 # ============================================================
 
-def image_as_base64(path):
-    """
-    Converts an image to a browser-friendly base64 string.
-    This lets us control the exact responsive size with CSS.
-    """
+def current_india_datetime():
 
     try:
-        if not path.exists():
-            return None
-
-        encoded = base64.b64encode(path.read_bytes()).decode("utf-8")
-
-        suffix = path.suffix.lower()
-
-        if suffix in [".jpg", ".jpeg", ".jfif"]:
-            mime = "image/jpeg"
-        elif suffix == ".png":
-            mime = "image/png"
-        elif suffix == ".webp":
-            mime = "image/webp"
-        else:
-            mime = "image/png"
-
-        return f"data:{mime};base64,{encoded}"
+        return datetime.now(
+            ZoneInfo("Asia/Kolkata")
+        )
 
     except Exception:
-        return None
+        return datetime.now(timezone.utc)
 
 
-LOGO_DATA = image_as_base64(LOGO_PATH)
-BANNER_DATA = image_as_base64(BANNER_PATH)
+def date_context():
+
+    now = current_india_datetime()
+
+    return (
+        f"Current date: {now.strftime('%d %B %Y')}\n"
+        f"Current day of the week: {now.strftime('%A')}\n"
+        f"Current time in India (IST): {now.strftime('%I:%M %p')}\n"
+        f"Timezone: Asia/Kolkata (IST)"
+    )
 
 
 # ============================================================
-# GLOBAL UI / RESPONSIVE CSS
+# CSS
 # ============================================================
 
 st.markdown(
     """
     <style>
 
-    /* ========================================================
-       GLOBAL
-       ======================================================== */
-
     .stApp {
         background: #ffffff;
     }
-
-    .main .block-container {
-        max-width: 1180px;
-        padding-top: 1.2rem;
-        padding-bottom: 5rem;
-    }
-
-
-    /* ========================================================
-       SIDEBAR
-       ======================================================== */
 
     section[data-testid="stSidebar"] {
         background: #f7f8fc;
         border-right: 1px solid #e7e9ef;
     }
 
-    section[data-testid="stSidebar"] .block-container {
-        padding-top: 1.2rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
-    }
-
-    .sidebar-brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 16px;
-    }
-
-    .sidebar-logo {
-        width: 38px;
-        height: 38px;
-        border-radius: 11px;
-        object-fit: cover;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.12);
-    }
-
-    .sidebar-brand-text {
-        font-size: 22px;
-        font-weight: 800;
-        color: #172033;
-    }
-
-    .history-label {
-        margin-top: 20px;
-        margin-bottom: 8px;
-        color: #8a8f9d;
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: .8px;
-    }
-
-    .empty-history {
-        color: #8a8f9d;
-        font-size: 13px;
-        padding: 12px 6px;
-    }
-
-    div[data-testid="stSidebar"] button {
-        border-radius: 10px !important;
-    }
-
-
     /* ========================================================
-       MAIN BRAND
+       LOGIN PAGE
        ======================================================== */
 
-    .main-brand {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin: 2px 0 3px 0;
-    }
-
-    .main-logo {
-        width: 48px;
-        height: 48px;
-        border-radius: 14px;
-        object-fit: cover;
-        box-shadow: 0 7px 20px rgba(0,0,0,0.12);
-    }
-
-    .main-brand-name {
-        font-size: 30px;
-        font-weight: 800;
-        letter-spacing: -1px;
-        color: #172033;
-    }
-
-    .main-subtitle {
-        color: #6b7280;
-        margin: 0 0 14px 60px;
-        font-size: 14px;
-    }
-
-
-    /* ========================================================
-       BANNER
-       ======================================================== */
-
-    .banner-wrapper {
-        width: 100%;
-        max-width: 920px;
-        margin: 12px auto 18px auto;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-    }
-
-    .banner-image {
-        display: block;
-        width: 100%;
-        max-width: 920px;
-        max-height: 220px;
-        object-fit: contain;
-        object-position: center;
-        border-radius: 16px;
-        box-shadow: 0 5px 22px rgba(0,0,0,0.08);
-    }
-
-
-    /* ========================================================
-       AUTH PAGE
-       ======================================================== */
-
-    .auth-page {
-        width: 100%;
-        max-width: 900px;
-        margin: 0 auto;
-    }
-
-    .auth-banner-wrapper {
+    .auth-wrapper {
         width: 100%;
         max-width: 850px;
-        margin: 4px auto 16px auto;
-        display: flex;
-        justify-content: center;
-    }
-
-    .auth-banner {
-        width: 100%;
-        max-width: 850px;
-        max-height: 175px;
-        object-fit: contain;
-        object-position: center;
-        border-radius: 15px;
-        box-shadow: 0 5px 20px rgba(0,0,0,0.08);
-    }
-
-    .auth-header {
+        margin: 25px auto 20px auto;
         text-align: center;
-        margin: 4px auto 12px auto;
-    }
-
-    .auth-logo {
-        width: 58px;
-        height: 58px;
-        border-radius: 17px;
-        object-fit: cover;
-        box-shadow: 0 7px 20px rgba(0,0,0,0.12);
-        margin-bottom: 5px;
     }
 
     .auth-title {
-        font-size: 30px;
+        font-size: 31px;
         font-weight: 800;
         color: #172033;
-        margin: 0;
+        margin-top: 12px;
     }
 
     .auth-subtitle {
         color: #6b7280;
-        font-size: 14px;
+        font-size: 15px;
         margin-top: 5px;
+        margin-bottom: 25px;
+    }
+
+    .auth-logo {
+        width: 105px;
+        height: 105px;
+        object-fit: contain;
+        border-radius: 50%;
+    }
+
+    .auth-banner {
+        display: block;
+        width: 100%;
+        max-width: 887px;
+        height: auto;
+        margin: 18px auto 25px auto;
+        border-radius: 18px;
+    }
+
+
+    /* ========================================================
+       MAIN BRANDING
+       ======================================================== */
+
+    .app-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 5px;
+        margin-bottom: 2px;
+    }
+
+    .app-brand-name {
+        font-size: 30px;
+        font-weight: 800;
+        color: #172033;
+        letter-spacing: -1px;
+    }
+
+    .app-subtitle {
+        color: #6b7280;
+        font-size: 14px;
+        margin-left: 58px;
+        margin-bottom: 20px;
     }
 
 
@@ -449,81 +265,25 @@ st.markdown(
        WELCOME
        ======================================================== */
 
-    .welcome-card {
-        max-width: 780px;
-        margin: 7vh auto 2vh auto;
+    .welcome-box {
+        width: 100%;
+        max-width: 850px;
+        margin: 7vh auto 3vh auto;
         text-align: center;
-        padding: 20px 20px;
-    }
-
-    .welcome-logo-image {
-        width: 70px;
-        height: 70px;
-        border-radius: 20px;
-        object-fit: cover;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-        margin-bottom: 10px;
-    }
-
-    .welcome-icon {
-        font-size: 52px;
-        margin-bottom: 5px;
+        padding: 20px;
     }
 
     .welcome-title {
-        font-size: 34px;
+        font-size: 31px;
         font-weight: 800;
         color: #172033;
-        letter-spacing: -1px;
     }
 
     .welcome-text {
         color: #6b7280;
-        font-size: 15px;
         line-height: 1.6;
-    }
-
-
-    /* ========================================================
-       SUGGESTIONS
-       ======================================================== */
-
-    .suggestion {
-        border: 1px solid #e7e9ef;
-        border-radius: 14px;
-        padding: 14px 16px;
-        background: #fbfcff;
-        margin: 5px 0;
-        text-align: left;
-        color: #3f4654;
-        min-height: 70px;
-    }
-
-
-    /* ========================================================
-       STATUS
-       ======================================================== */
-
-    .status-card {
-        border: 1px solid #e7e9ef;
-        border-radius: 13px;
-        padding: 10px 12px;
-        background: white;
-        font-size: 12px;
-        color: #596170;
-    }
-
-
-    /* ========================================================
-       FOOTER
-       ======================================================== */
-
-    .chat-footer-note {
-        text-align: center;
-        color: #9aa0ad;
-        font-size: 11px;
-        margin-top: 12px;
-        padding-bottom: 8px;
+        max-width: 700px;
+        margin: 10px auto;
     }
 
 
@@ -533,59 +293,21 @@ st.markdown(
 
     @media (max-width: 700px) {
 
-        .main .block-container {
-            padding-left: 0.8rem;
-            padding-right: 0.8rem;
-            padding-top: 0.8rem;
-        }
-
-        .main-brand {
-            gap: 9px;
-        }
-
-        .main-logo {
-            width: 40px;
-            height: 40px;
-            border-radius: 11px;
-        }
-
-        .main-brand-name {
-            font-size: 24px;
-        }
-
-        .main-subtitle {
-            margin-left: 49px;
-            font-size: 12px;
-            margin-bottom: 9px;
-        }
-
-        .banner-wrapper {
-            margin: 8px auto 12px auto;
-        }
-
-        .banner-image {
+        .auth-wrapper {
             width: 100%;
-            max-height: 125px;
-            border-radius: 10px;
-        }
-
-        .auth-page {
-            max-width: 100%;
-        }
-
-        .auth-banner-wrapper {
-            margin-bottom: 10px;
-        }
-
-        .auth-banner {
-            max-height: 125px;
-            border-radius: 10px;
+            margin-top: 5px;
         }
 
         .auth-logo {
-            width: 50px;
-            height: 50px;
-            border-radius: 14px;
+            width: 80px;
+            height: 80px;
+        }
+
+        .auth-banner {
+            width: 100%;
+            height: auto;
+            border-radius: 10px;
+            margin-top: 12px;
         }
 
         .auth-title {
@@ -593,30 +315,24 @@ st.markdown(
         }
 
         .auth-subtitle {
+            font-size: 14px;
+        }
+
+        .app-brand-name {
+            font-size: 25px;
+        }
+
+        .app-subtitle {
+            margin-left: 0;
             font-size: 13px;
         }
 
-        .welcome-card {
-            margin-top: 5vh;
-            padding: 15px 10px;
-        }
-
-        .welcome-logo-image {
-            width: 58px;
-            height: 58px;
-            border-radius: 17px;
-        }
-
         .welcome-title {
-            font-size: 26px;
+            font-size: 25px;
         }
 
         .welcome-text {
             font-size: 14px;
-        }
-
-        .suggestion {
-            min-height: auto;
         }
     }
 
@@ -627,90 +343,71 @@ st.markdown(
 
 
 # ============================================================
-# IMAGE HTML HELPERS
-# ============================================================
-
-def show_banner(auth=False):
-
-    if not BANNER_DATA:
-        return
-
-    css_class = "auth-banner" if auth else "banner-image"
-    wrapper_class = (
-        "auth-banner-wrapper"
-        if auth
-        else "banner-wrapper"
-    )
-
-    st.markdown(
-        f"""
-        <div class="{wrapper_class}">
-            <img
-                class="{css_class}"
-                src="{BANNER_DATA}"
-                alt="ManaTechSaavy banner"
-            >
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def show_logo(css_class="main-logo"):
-
-    if not LOGO_DATA:
-        return None
-
-    return f"""
-        <img
-            class="{css_class}"
-            src="{LOGO_DATA}"
-            alt="RacharlaGPT logo"
-        >
-    """
-
-
-# ============================================================
 # AUTHENTICATION PAGE
 # ============================================================
 
 def show_auth():
 
-    st.markdown('<div class="auth-page">', unsafe_allow_html=True)
-
-    # Small responsive banner.
-    # It will NEVER occupy the entire screen.
-    show_banner(auth=True)
-
-    logo_html = ""
-
-    if LOGO_DATA:
-        logo_html = show_logo("auth-logo")
-
     st.markdown(
-        f"""
-        <div class="auth-header">
-            {logo_html}
-            <div class="auth-title">Welcome to RacharlaGPT</div>
-            <div class="auth-subtitle">
-                Sign in to save your conversations permanently.
-            </div>
+        '<div class="auth-wrapper">',
+        unsafe_allow_html=True,
+    )
+
+    # Logo
+    if LOGO_PATH.exists():
+
+        st.image(
+            str(LOGO_PATH),
+            width=105,
+        )
+
+    # Banner
+    if BANNER_PATH.exists():
+
+        st.image(
+            str(BANNER_PATH),
+            use_container_width=True,
+        )
+
+    # Branding
+    st.markdown(
+        """
+        <div class="auth-title">
+            RacharlaGPT
+        </div>
+
+        <div class="auth-subtitle">
+            Sign in to save your conversations permanently.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    _, center, _ = st.columns([1, 1.8, 1])
+    st.markdown(
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+    # ========================================================
+    # AUTH TABS
+    # ========================================================
+
+    _, center, _ = st.columns([1, 2, 1])
 
     with center:
 
         login_tab, signup_tab = st.tabs(
-            ["🔐 Sign In", "✨ Create Account"]
+            [
+                "🔐 Sign In",
+                "✨ Create Account",
+            ]
         )
 
-        # ----------------------------------------------------
+
+        # ====================================================
         # SIGN IN
-        # ----------------------------------------------------
+        # ====================================================
 
         with login_tab:
 
@@ -719,14 +416,12 @@ def show_auth():
                 email = st.text_input(
                     "Email",
                     key="login_email",
-                    placeholder="Enter your email",
                 )
 
                 password = st.text_input(
                     "Password",
                     type="password",
                     key="login_password",
-                    placeholder="Enter your password",
                 )
 
                 submit = st.form_submit_button(
@@ -735,56 +430,56 @@ def show_auth():
                     use_container_width=True,
                 )
 
+
             if submit:
 
-                if not email or not password:
+                if not email.strip() or not password:
 
                     st.warning(
-                        "Please enter your email and password."
+                        "Enter your email and password."
                     )
 
                 else:
 
                     try:
 
-                        result = supabase.auth.sign_in_with_password(
-                            {
-                                "email": email.strip(),
-                                "password": password,
-                            }
+                        result = (
+                            supabase.auth
+                            .sign_in_with_password(
+                                {
+                                    "email": email.strip(),
+                                    "password": password,
+                                }
+                            )
                         )
+
 
                         if result.user and result.session:
 
-                            st.session_state.auth_user = result.user
+                            st.session_state.auth_user = (
+                                result.user
+                            )
 
                             st.rerun()
 
                         else:
 
                             st.error(
-                                "Sign in failed. Please check your details."
+                                "Sign in failed. "
+                                "Please check your email and password."
                             )
+
 
                     except Exception as exc:
 
-                        error_text = str(exc)
+                        st.error(
+                            f"Sign in failed: {exc}"
+                        )
 
-                        if "Invalid login credentials" in error_text:
 
-                            st.error(
-                                "Incorrect email or password."
-                            )
-
-                        else:
-
-                            st.error(
-                                f"Sign in failed: {error_text}"
-                            )
-
-        # ----------------------------------------------------
+        # ====================================================
         # CREATE ACCOUNT
-        # ----------------------------------------------------
+        # ====================================================
 
         with signup_tab:
 
@@ -793,21 +488,18 @@ def show_auth():
                 email = st.text_input(
                     "Email",
                     key="signup_email",
-                    placeholder="Enter your email",
                 )
 
                 password = st.text_input(
                     "Password",
                     type="password",
                     key="signup_password",
-                    placeholder="Create a password",
                 )
 
                 confirm = st.text_input(
                     "Confirm password",
                     type="password",
                     key="signup_confirm",
-                    placeholder="Repeat your password",
                 )
 
                 submit = st.form_submit_button(
@@ -816,12 +508,13 @@ def show_auth():
                     use_container_width=True,
                 )
 
+
             if submit:
 
-                if not email or not password:
+                if not email.strip() or not password:
 
                     st.warning(
-                        "Please enter your email and password."
+                        "Enter your email and password."
                     )
 
                 elif password != confirm:
@@ -847,63 +540,40 @@ def show_auth():
                             }
                         )
 
+
                         if result.session and result.user:
 
-                            st.session_state.auth_user = result.user
+                            st.session_state.auth_user = (
+                                result.user
+                            )
 
                             st.rerun()
 
                         else:
 
                             st.success(
-                                "Account created successfully. "
-                                "Please sign in."
+                                "Account created. "
+                                "You can now sign in."
                             )
+
 
                     except Exception as exc:
 
-                        error_text = str(exc)
-
-                        if "already registered" in error_text.lower():
-
-                            st.error(
-                                "This email is already registered. "
-                                "Please use Sign In."
-                            )
-
-                        else:
-
-                            st.error(
-                                f"Account creation failed: {error_text}"
-                            )
-
-    st.markdown(
-        """
-        <div style="
-            text-align:center;
-            color:#9aa0ad;
-            font-size:11px;
-            margin-top:18px;
-        ">
-            RacharlaGPT • Secure account • Permanent cloud chat history
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("</div>", unsafe_allow_html=True)
+                        st.error(
+                            f"Account creation failed: {exc}"
+                        )
 
 
 # ============================================================
 # AUTH GATE
 # ============================================================
-
+#
 # THIS IS IMPORTANT.
 #
-# A fresh browser session has no auth_user.
-# Therefore the SIGN IN / CREATE ACCOUNT page is shown first.
+# A completely new Streamlit browser session has no auth_user.
+# Therefore it MUST show Sign In / Create Account.
 #
-# The main chatbot is impossible to open directly without login.
+# ============================================================
 
 if "auth_user" not in st.session_state:
 
@@ -918,22 +588,41 @@ USER_ID = str(auth_user.id)
 
 
 # ============================================================
-# MODEL STATE
+# MODELS
+# ============================================================
+
+@st.cache_resource(show_spinner=False)
+def get_models(api_key):
+
+    primary = ChatGroq(
+        model=PRIMARY_MODEL,
+        temperature=0.7,
+        api_key=api_key,
+    )
+
+    backup = ChatGroq(
+        model=BACKUP_MODEL,
+        temperature=0.7,
+        api_key=api_key,
+    )
+
+    return primary, backup
+
+
+primary_llm, backup_llm = get_models(
+    GROQ_API_KEY
+)
+
+
+# ============================================================
+# SESSION STATE
 # ============================================================
 
 if "system_prompt" not in st.session_state:
 
-    st.session_state.system_prompt = DEFAULT_SYSTEM_PROMPT
-
-
-if "selected_model" not in st.session_state:
-
-    st.session_state.selected_model = "Auto (recommended)"
-
-
-if "temperature" not in st.session_state:
-
-    st.session_state.temperature = 0.7
+    st.session_state.system_prompt = (
+        DEFAULT_SYSTEM_PROMPT
+    )
 
 
 if "chats" not in st.session_state:
@@ -956,13 +645,27 @@ if "search" not in st.session_state:
     st.session_state.search = ""
 
 
+if "selected_model" not in st.session_state:
+
+    st.session_state.selected_model = (
+        "Auto (recommended)"
+    )
+
+
+if "temperature" not in st.session_state:
+
+    st.session_state.temperature = 0.7
+
+
 # ============================================================
-# CHAT HELPERS
+# CHAT FUNCTIONS
 # ============================================================
 
 def blank_chat():
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
 
     return {
         "id": str(uuid.uuid4()),
@@ -972,23 +675,6 @@ def blank_chat():
         "created_at": now,
         "updated_at": now,
     }
-
-
-def title_for(text):
-
-    cleaned = " ".join(
-        text.strip().split()
-    )
-
-    if not cleaned:
-
-        return "New Chat"
-
-    if len(cleaned) <= 34:
-
-        return cleaned
-
-    return cleaned[:34].rstrip() + "…"
 
 
 def load_chats():
@@ -1006,10 +692,8 @@ def load_chats():
 
     for row in result.data or []:
 
-        chat_id = str(row["id"])
-
-        chats[chat_id] = {
-            "id": chat_id,
+        chats[str(row["id"])] = {
+            "id": str(row["id"]),
             "user_id": str(row["user_id"]),
             "title": row.get("title") or "New Chat",
             "messages": row.get("messages") or [],
@@ -1017,20 +701,31 @@ def load_chats():
             "updated_at": row.get("updated_at"),
         }
 
+
+    # Create first chat for a new account
+
     if not chats:
 
         chat = blank_chat()
 
-        supabase.table("chats").insert(chat).execute()
+        (
+            supabase
+            .table("chats")
+            .insert(chat)
+            .execute()
+        )
 
         chats[chat["id"]] = chat
+
 
     return chats
 
 
 def save_chat(chat):
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(
+        timezone.utc
+    ).isoformat()
 
     (
         supabase
@@ -1082,19 +777,22 @@ def delete_chat(chat_id):
         None,
     )
 
+
     if not st.session_state.chats:
 
         create_chat()
 
-        return
+    else:
 
-    ordered = sorted(
-        st.session_state.chats.values(),
-        key=lambda x: x.get("updated_at") or "",
-        reverse=True,
-    )
+        ordered = sorted(
+            st.session_state.chats.values(),
+            key=lambda x: x.get("updated_at") or "",
+            reverse=True,
+        )
 
-    st.session_state.current_chat_id = ordered[0]["id"]
+        st.session_state.current_chat_id = (
+            ordered[0]["id"]
+        )
 
 
 def delete_all():
@@ -1112,6 +810,23 @@ def delete_all():
     create_chat()
 
 
+def title_for(text):
+
+    text = " ".join(
+        text.strip().split()
+    )
+
+    if len(text) <= 34:
+
+        return text
+
+    return (
+        text[:34]
+        .rstrip()
+        + "…"
+    )
+
+
 def current_chat():
 
     if (
@@ -1127,7 +842,142 @@ def current_chat():
 
 
 # ============================================================
-# LOAD USER CHATS
+# AI RESPONSE
+# ============================================================
+
+def ask(chat):
+
+    recent = chat["messages"][
+        -MAX_CONTEXT_MESSAGES:
+    ]
+
+
+    # Dynamic date/time information is supplied every time
+    # the AI answers a question.
+
+    system_content = (
+        st.session_state.system_prompt
+        + "\n\n"
+        + "REAL-TIME DATE CONTEXT:\n"
+        + date_context()
+    )
+
+
+    msgs = [
+        SystemMessage(
+            content=system_content
+        )
+    ]
+
+
+    for message in recent:
+
+        if message["role"] == "user":
+
+            msgs.append(
+                HumanMessage(
+                    content=message["content"]
+                )
+            )
+
+        else:
+
+            msgs.append(
+                AIMessage(
+                    content=message["content"]
+                )
+            )
+
+
+    selected = (
+        st.session_state.selected_model
+    )
+
+
+    # ========================================================
+    # PRIMARY ONLY
+    # ========================================================
+
+    if selected == PRIMARY_MODEL:
+
+        try:
+
+            llm = ChatGroq(
+                model=PRIMARY_MODEL,
+                temperature=st.session_state.temperature,
+                api_key=GROQ_API_KEY,
+            )
+
+            return (
+                llm.invoke(msgs),
+                "primary",
+            )
+
+        except RateLimitError:
+
+            llm = ChatGroq(
+                model=BACKUP_MODEL,
+                temperature=st.session_state.temperature,
+                api_key=GROQ_API_KEY,
+            )
+
+            return (
+                llm.invoke(msgs),
+                "backup",
+            )
+
+
+    # ========================================================
+    # BACKUP ONLY
+    # ========================================================
+
+    if selected == BACKUP_MODEL:
+
+        llm = ChatGroq(
+            model=BACKUP_MODEL,
+            temperature=st.session_state.temperature,
+            api_key=GROQ_API_KEY,
+        )
+
+        return (
+            llm.invoke(msgs),
+            "backup",
+        )
+
+
+    # ========================================================
+    # AUTO
+    # ========================================================
+
+    try:
+
+        llm = ChatGroq(
+            model=PRIMARY_MODEL,
+            temperature=st.session_state.temperature,
+            api_key=GROQ_API_KEY,
+        )
+
+        return (
+            llm.invoke(msgs),
+            "primary",
+        )
+
+    except RateLimitError:
+
+        llm = ChatGroq(
+            model=BACKUP_MODEL,
+            temperature=st.session_state.temperature,
+            api_key=GROQ_API_KEY,
+        )
+
+        return (
+            llm.invoke(msgs),
+            "backup",
+        )
+
+
+# ============================================================
+# LOAD SUPABASE CHATS
 # ============================================================
 
 if not st.session_state.loaded_from_supabase:
@@ -1142,129 +992,26 @@ if not st.session_state.loaded_from_supabase:
             reverse=True,
         )
 
-        st.session_state.current_chat_id = ordered[0]["id"]
+        if ordered:
+
+            st.session_state.current_chat_id = (
+                ordered[0]["id"]
+            )
 
         st.session_state.loaded_from_supabase = True
+
 
     except Exception as exc:
 
         st.error(
-            "Could not load your chats from Supabase."
+            "Could not load chats from Supabase."
         )
 
-        st.code(str(exc))
+        st.code(
+            str(exc)
+        )
 
         st.stop()
-
-
-# ============================================================
-# MODEL
-# ============================================================
-
-def ask(chat):
-
-    recent = chat["messages"][
-        -MAX_CONTEXT_MESSAGES:
-    ]
-
-    messages = [
-        SystemMessage(
-            content=(
-                st.session_state.system_prompt
-                + "\n\n"
-                + DATE_CONTEXT
-            )
-        )
-    ]
-
-    for message in recent:
-
-        if message["role"] == "user":
-
-            messages.append(
-                HumanMessage(
-                    content=message["content"]
-                )
-            )
-
-        elif message["role"] == "assistant":
-
-            messages.append(
-                AIMessage(
-                    content=message["content"]
-                )
-            )
-
-    selected = st.session_state.selected_model
-
-    temperature = st.session_state.temperature
-
-
-    # --------------------------------------------------------
-    # Explicit primary
-    # --------------------------------------------------------
-
-    if selected == PRIMARY_MODEL:
-
-        try:
-
-            llm = ChatGroq(
-                model=PRIMARY_MODEL,
-                temperature=temperature,
-                api_key=GROQ_API_KEY,
-            )
-
-            return llm.invoke(messages), "primary"
-
-        except RateLimitError:
-
-            llm = ChatGroq(
-                model=BACKUP_MODEL,
-                temperature=temperature,
-                api_key=GROQ_API_KEY,
-            )
-
-            return llm.invoke(messages), "backup"
-
-
-    # --------------------------------------------------------
-    # Explicit backup
-    # --------------------------------------------------------
-
-    if selected == BACKUP_MODEL:
-
-        llm = ChatGroq(
-            model=BACKUP_MODEL,
-            temperature=temperature,
-            api_key=GROQ_API_KEY,
-        )
-
-        return llm.invoke(messages), "backup"
-
-
-    # --------------------------------------------------------
-    # Automatic model
-    # --------------------------------------------------------
-
-    try:
-
-        llm = ChatGroq(
-            model=PRIMARY_MODEL,
-            temperature=temperature,
-            api_key=GROQ_API_KEY,
-        )
-
-        return llm.invoke(messages), "primary"
-
-    except RateLimitError:
-
-        llm = ChatGroq(
-            model=BACKUP_MODEL,
-            temperature=temperature,
-            api_key=GROQ_API_KEY,
-        )
-
-        return llm.invoke(messages), "backup"
 
 
 # ============================================================
@@ -1273,28 +1020,25 @@ def ask(chat):
 
 with st.sidebar:
 
-    logo_html = ""
+    # --------------------------------------------------------
+    # LOGO + BRAND
+    # --------------------------------------------------------
 
-    if LOGO_DATA:
+    if LOGO_PATH.exists():
 
-        logo_html = show_logo(
-            "sidebar-logo"
+        st.image(
+            str(LOGO_PATH),
+            width=55,
         )
-
-    else:
-
-        logo_html = (
-            '<span style="font-size:25px;">⚡</span>'
-        )
-
 
     st.markdown(
-        f"""
-        <div class="sidebar-brand">
-            {logo_html}
-            <span class="sidebar-brand-text">
-                RacharlaGPT
-            </span>
+        """
+        <div style="
+            font-size:26px;
+            font-weight:800;
+            margin-bottom:15px;
+        ">
+            ⚡ RacharlaGPT
         </div>
         """,
         unsafe_allow_html=True,
@@ -1309,7 +1053,6 @@ with st.sidebar:
         "＋ New Chat",
         type="primary",
         use_container_width=True,
-        key="new_chat_sidebar",
     ):
 
         create_chat()
@@ -1317,8 +1060,18 @@ with st.sidebar:
         st.rerun()
 
 
+    # --------------------------------------------------------
+    # ACCOUNT
+    # --------------------------------------------------------
+
+    user_email = getattr(
+        auth_user,
+        "email",
+        "User",
+    )
+
     st.caption(
-        f"Signed in: {getattr(auth_user, 'email', 'User')}"
+        f"Signed in: {user_email}"
     )
 
 
@@ -1329,7 +1082,6 @@ with st.sidebar:
     if st.button(
         "🚪 Sign Out",
         use_container_width=True,
-        key="signout_sidebar",
     ):
 
         try:
@@ -1340,11 +1092,14 @@ with st.sidebar:
 
             pass
 
+
         for key in [
             "auth_user",
             "chats",
             "current_chat_id",
             "loaded_from_supabase",
+            "selected_model",
+            "temperature",
         ]:
 
             st.session_state.pop(
@@ -1352,12 +1107,12 @@ with st.sidebar:
                 None,
             )
 
+
         st.rerun()
 
 
     st.markdown(
-        '<div class="history-label">YOUR CHATS</div>',
-        unsafe_allow_html=True,
+        "### YOUR CHATS"
     )
 
 
@@ -1366,10 +1121,9 @@ with st.sidebar:
     # --------------------------------------------------------
 
     search = st.text_input(
-        "Search chats",
+        "Search",
         placeholder="🔎 Search your chats...",
         label_visibility="collapsed",
-        key="chat_search_box",
     )
 
     st.session_state.search = search
@@ -1396,21 +1150,24 @@ with st.sidebar:
                 key="rename_chat_title",
             )
 
+
             if st.button(
                 "Save name",
                 use_container_width=True,
-                key="save_chat_name",
             ):
 
                 rename_value = " ".join(
                     rename_value.strip().split()
                 )
 
+
                 if rename_value:
 
-                    current = st.session_state.chats[
-                        st.session_state.current_chat_id
-                    ]
+                    current = (
+                        st.session_state.chats[
+                            st.session_state.current_chat_id
+                        ]
+                    )
 
                     current["title"] = (
                         rename_value[:80]
@@ -1431,51 +1188,39 @@ with st.sidebar:
         reverse=True,
     )
 
-    query = search.lower().strip()
-
-    visible_count = 0
 
     for chat_id, item in ordered:
 
+        q = search.lower().strip()
+
         matches = (
-            not query
-            or query in item["title"].lower()
+            not q
+            or q in item["title"].lower()
             or any(
-                query in str(
+                q in str(
                     message.get("content", "")
                 ).lower()
                 for message in item["messages"]
             )
         )
 
+
         if not matches:
 
             continue
 
-        visible_count += 1
 
-        col_chat, col_delete = st.columns(
-            [4, 1],
-            gap="small",
-        )
-
-        is_current = (
-            chat_id
-            == st.session_state.current_chat_id
+        c1, c2 = st.columns(
+            [4, 1]
         )
 
 
-        with col_chat:
+        with c1:
 
             if st.button(
                 f"💬 {item['title']}",
                 key=f"open_{chat_id}",
                 use_container_width=True,
-                type=(
-                    "primary"
-                    if is_current
-                    else "secondary"
-                ),
             ):
 
                 st.session_state.current_chat_id = (
@@ -1485,11 +1230,11 @@ with st.sidebar:
                 st.rerun()
 
 
-        with col_delete:
+        with c2:
 
             if st.button(
                 "🗑️",
-                key=f"delete_{chat_id}",
+                key=f"del_{chat_id}",
                 use_container_width=True,
             ):
 
@@ -1498,54 +1243,44 @@ with st.sidebar:
                 st.rerun()
 
 
-    if visible_count == 0:
-
-        st.markdown(
-            '<div class="empty-history">'
-            'No chats match your search.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
-
     st.divider()
 
 
-    # --------------------------------------------------------
-    # DOWNLOAD CHAT
-    # --------------------------------------------------------
+    # ========================================================
+    # DOWNLOAD
+    # ========================================================
 
     current_export = st.session_state.chats.get(
         st.session_state.current_chat_id
     )
 
+
     if current_export:
 
-        export_lines = []
-
-        export_lines.append(
-            "RACHARLAGPT"
+        title = (
+            current_export["title"]
+            or "RacharlaGPT Chat"
         )
 
-        export_lines.append(
-            f"Chat: {current_export['title']}"
+
+        # ----------------------------------------------------
+        # PLAIN TEXT
+        # Works on practically every phone/computer.
+        # ----------------------------------------------------
+
+        txt_lines = []
+
+        txt_lines.append(
+            f"{title}\n"
         )
 
-        export_lines.append(
-            f"Date exported: "
-            f"{datetime.now().strftime('%d-%m-%Y %H:%M')}"
+        txt_lines.append(
+            "RacharlaGPT Conversation\n"
         )
 
-        export_lines.append(
-            ""
-        )
-
-        export_lines.append(
-            "=" * 60
-        )
-
-        export_lines.append(
-            ""
+        txt_lines.append(
+            "=" * 50
+            + "\n"
         )
 
 
@@ -1554,24 +1289,22 @@ with st.sidebar:
             [],
         ):
 
-            if message.get("role") == "user":
-
-                role = "YOU"
-
-            else:
-
-                role = "RACHARLAGPT"
-
-
-            export_lines.append(
-                role
+            role = (
+                "You"
+                if message.get("role") == "user"
+                else "RacharlaGPT"
             )
 
-            export_lines.append(
+            txt_lines.append(
+                f"\n{role}\n"
+            )
+
+            txt_lines.append(
                 "-" * 30
+                + "\n"
             )
 
-            export_lines.append(
+            txt_lines.append(
                 str(
                     message.get(
                         "content",
@@ -1580,55 +1313,181 @@ with st.sidebar:
                 )
             )
 
-            export_lines.append(
-                ""
-            )
-
-            export_lines.append(
-                "=" * 60
-            )
-
-            export_lines.append(
-                ""
+            txt_lines.append(
+                "\n"
             )
 
 
-        export_text = "\n".join(
-            export_lines
+        text_download = "".join(
+            txt_lines
         )
 
 
-        # TXT is deliberately used because it opens
-        # on Android, iPhone, Windows, Mac and Linux.
-        safe_filename = (
-            current_export["title"]
-            .replace("/", "-")
-            .replace("\\", "-")
-            .replace(":", "-")
-            .replace("*", "-")
-            .replace("?", "-")
-            .replace('"', "-")
-            .replace("<", "-")
-            .replace(">", "-")
-            .replace("|", "-")
-            .strip()
+        # ----------------------------------------------------
+        # SELF-CONTAINED HTML
+        #
+        # Opens nicely in Android, iPhone, Windows,
+        # Mac and browsers.
+        #
+        # No internet connection required.
+        # ----------------------------------------------------
+
+        html_parts = [
+            "<!DOCTYPE html>",
+            "<html>",
+            "<head>",
+            '<meta charset="UTF-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+            f"<title>{escape(title)}</title>",
+            """
+            <style>
+                body {
+                    font-family: Arial, sans-serif;
+                    max-width: 900px;
+                    margin: auto;
+                    padding: 20px;
+                    line-height: 1.6;
+                    background: #ffffff;
+                    color: #222222;
+                }
+
+                h1 {
+                    font-size: 26px;
+                }
+
+                .message {
+                    border: 1px solid #dddddd;
+                    border-radius: 12px;
+                    padding: 15px;
+                    margin: 15px 0;
+                }
+
+                .role {
+                    font-weight: bold;
+                    margin-bottom: 8px;
+                }
+
+                .user {
+                    background: #f5f5f5;
+                }
+
+                .assistant {
+                    background: #ffffff;
+                }
+
+                .content {
+                    white-space: pre-wrap;
+                    word-wrap: break-word;
+                }
+
+                .footer {
+                    margin-top: 30px;
+                    color: #777777;
+                    font-size: 12px;
+                    text-align: center;
+                }
+            </style>
+            """,
+            "</head>",
+            "<body>",
+            f"<h1>{escape(title)}</h1>",
+        ]
+
+
+        for message in current_export.get(
+            "messages",
+            [],
+        ):
+
+            is_user = (
+                message.get("role") == "user"
+            )
+
+            role = (
+                "You"
+                if is_user
+                else "RacharlaGPT"
+            )
+
+            css_class = (
+                "user"
+                if is_user
+                else "assistant"
+            )
+
+            content = escape(
+                str(
+                    message.get(
+                        "content",
+                        "",
+                    )
+                )
+            )
+
+
+            html_parts.append(
+                f"""
+                <div class="message {css_class}">
+                    <div class="role">
+                        {role}
+                    </div>
+
+                    <div class="content">
+                        {content}
+                    </div>
+                </div>
+                """
+            )
+
+
+        html_parts.extend(
+            [
+                """
+                <div class="footer">
+                    RacharlaGPT • Powered by Groq
+                </div>
+                """,
+                "</body>",
+                "</html>",
+            ]
         )
 
-        if not safe_filename:
 
-            safe_filename = "RacharlaGPT_Chat"
+        html_download = "".join(
+            html_parts
+        )
+
+
+        st.markdown(
+            "### 📥 Download"
+        )
 
 
         st.download_button(
-            "⬇️ Download Chat",
-            data=export_text,
+            "📄 Download TXT",
+            data=text_download,
             file_name=(
-                safe_filename[:50]
-                + ".txt"
+                f"{title[:45]}.txt"
             ),
             mime="text/plain",
             use_container_width=True,
-            key="download_chat_txt",
+        )
+
+
+        st.download_button(
+            "🌐 Download HTML",
+            data=html_download,
+            file_name=(
+                f"{title[:45]}.html"
+            ),
+            mime="text/html",
+            use_container_width=True,
+        )
+
+
+        st.caption(
+            "TXT is the most universal format. "
+            "HTML keeps headings and conversation formatting."
         )
 
 
@@ -1639,7 +1498,6 @@ with st.sidebar:
     if st.button(
         "🗑️ Delete All Chats",
         use_container_width=True,
-        key="delete_all_sidebar",
     ):
 
         delete_all()
@@ -1650,9 +1508,9 @@ with st.sidebar:
     st.divider()
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # AI SETTINGS
-    # --------------------------------------------------------
+    # ========================================================
 
     with st.expander(
         "⚙️ AI Settings",
@@ -1680,7 +1538,7 @@ with st.sidebar:
                 ),
                 step=0.1,
                 help=(
-                    "Lower = focused and factual. "
+                    "Lower = more focused. "
                     "Higher = more creative."
                 ),
             )
@@ -1690,8 +1548,10 @@ with st.sidebar:
         st.session_state.system_prompt = (
             st.text_area(
                 "AI System Prompt",
-                value=st.session_state.system_prompt,
-                height=160,
+                value=(
+                    st.session_state.system_prompt
+                ),
+                height=170,
             )
         )
 
@@ -1699,7 +1559,6 @@ with st.sidebar:
         if st.button(
             "↩️ Reset AI Settings",
             use_container_width=True,
-            key="reset_ai_settings",
         ):
 
             st.session_state.selected_model = (
@@ -1724,57 +1583,49 @@ with st.sidebar:
     )
 
     st.caption(
-        "☁️ Chats stored permanently in Supabase"
+        "☁️ Chats stored in Supabase"
     )
 
 
 # ============================================================
-# MAIN HEADER
+# MAIN APPLICATION BRANDING
 # ============================================================
 
-main_logo_html = ""
-
-if LOGO_DATA:
-
-    main_logo_html = show_logo(
-        "main-logo"
-    )
-
-else:
-
-    main_logo_html = (
-        '<div style="'
-        'width:48px;height:48px;'
-        'border-radius:14px;'
-        'display:flex;align-items:center;'
-        'justify-content:center;'
-        'background:#ff9f1c;'
-        'font-size:25px;">⚡</div>'
-    )
-
-
-st.markdown(
-    f"""
-    <div class="main-brand">
-        {main_logo_html}
-        <div class="main-brand-name">
-            RacharlaGPT
-        </div>
-    </div>
-
-    <div class="main-subtitle">
-        Fast, intelligent AI conversations powered by Groq
-    </div>
-    """,
-    unsafe_allow_html=True,
+c1, c2 = st.columns(
+    [1, 12]
 )
 
 
-# ============================================================
-# SHOW COMPACT BANNER AFTER LOGIN
-# ============================================================
+with c1:
 
-show_banner(auth=False)
+    if LOGO_PATH.exists():
+
+        st.image(
+            str(LOGO_PATH),
+            width=48,
+        )
+
+    else:
+
+        st.markdown(
+            "⚡"
+        )
+
+
+with c2:
+
+    st.markdown(
+        """
+        <div class="app-brand-name">
+            RacharlaGPT
+        </div>
+
+        <div class="app-subtitle">
+            Fast, intelligent AI conversations powered by Groq
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ============================================================
@@ -1785,31 +1636,14 @@ chat = current_chat()
 
 
 # ============================================================
-# WELCOME SCREEN
+# EMPTY CHAT
 # ============================================================
 
 if not chat["messages"]:
 
-    welcome_logo_html = ""
-
-    if LOGO_DATA:
-
-        welcome_logo_html = show_logo(
-            "welcome-logo-image"
-        )
-
-    else:
-
-        welcome_logo_html = (
-            '<div class="welcome-icon">⚡</div>'
-        )
-
-
     st.markdown(
-        f"""
-        <div class="welcome-card">
-
-            {welcome_logo_html}
+        """
+        <div class="welcome-box">
 
             <div class="welcome-title">
                 Welcome to RacharlaGPT
@@ -1827,48 +1661,8 @@ if not chat["messages"]:
     )
 
 
-    suggestion_cols = st.columns(3)
-
-
-    suggestions = [
-        (
-            "💡 Learn",
-            "Explain a difficult topic simply",
-        ),
-        (
-            "💻 Code",
-            "Build a Streamlit application",
-        ),
-        (
-            "🚀 Create",
-            "Give me a creative project idea",
-        ),
-    ]
-
-
-    for col, (
-        heading,
-        prompt_text,
-    ) in zip(
-        suggestion_cols,
-        suggestions,
-    ):
-
-        with col:
-
-            st.markdown(
-                f"""
-                <div class="suggestion">
-                    <b>{heading}</b><br>
-                    <span>{prompt_text}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-
 # ============================================================
-# RENDER CHAT HISTORY
+# CHAT HISTORY
 # ============================================================
 
 for message in chat["messages"]:
@@ -1899,7 +1693,7 @@ if user_input:
     if user_input:
 
         # ----------------------------------------------------
-        # SAVE USER MESSAGE
+        # Save user message
         # ----------------------------------------------------
 
         chat["messages"].append(
@@ -1910,12 +1704,20 @@ if user_input:
         )
 
 
+        # ----------------------------------------------------
+        # Automatic title
+        # ----------------------------------------------------
+
         if chat["title"] == "New Chat":
 
             chat["title"] = title_for(
                 user_input
             )
 
+
+        # ----------------------------------------------------
+        # Display user message
+        # ----------------------------------------------------
 
         with st.chat_message("user"):
 
@@ -1925,18 +1727,20 @@ if user_input:
 
 
         # ----------------------------------------------------
-        # ASK AI
+        # Generate answer
         # ----------------------------------------------------
 
-        with st.chat_message("assistant"):
+        try:
 
-            try:
+            with st.chat_message(
+                "assistant"
+            ):
 
                 with st.spinner(
                     "RacharlaGPT is thinking…"
                 ):
 
-                    response, model_used = ask(
+                    response, used = ask(
                         chat
                     )
 
@@ -1949,89 +1753,81 @@ if user_input:
                     str,
                 ):
 
-                    answer = str(answer)
+                    answer = str(
+                        answer
+                    )
 
-
-                # --------------------------------------------
-                # SAVE ASSISTANT MESSAGE
-                # --------------------------------------------
-
-                chat["messages"].append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                    }
-                )
-
-
-                save_chat(chat)
-
-
-                # --------------------------------------------
-                # DISPLAY RESPONSE
-                # --------------------------------------------
 
                 st.markdown(
                     answer
                 )
 
 
-                if model_used == "backup":
+                if used == "backup":
 
                     st.caption(
-                        "Primary model was temporarily "
-                        "rate-limited. Answered using "
-                        f"{BACKUP_MODEL}."
+                        "Primary model was rate-limited; "
+                        f"answered with {BACKUP_MODEL}."
                     )
 
 
-            except RateLimitError:
+            # ------------------------------------------------
+            # Save assistant response
+            # ------------------------------------------------
 
-                friendly = """
-⚠️ **Groq rate limit reached.**
+            chat["messages"].append(
+                {
+                    "role": "assistant",
+                    "content": answer,
+                }
+            )
 
-The available Groq quota for the selected models is temporarily exhausted.
 
-This is an API quota issue, not a problem with your question.
+            save_chat(
+                chat
+            )
 
-Please wait for the quota window to reset and try again.
-"""
 
-                st.markdown(
-                    friendly
+        except RateLimitError:
+
+            with st.chat_message(
+                "assistant"
+            ):
+
+                st.warning(
+                    "Groq rate limit reached. "
+                    "Please wait for the quota to reset "
+                    "and try again."
                 )
 
 
-                if (
-                    chat["messages"]
-                    and chat["messages"][-1]["role"]
-                    == "user"
-                ):
+            # Remove unsaved user message
 
-                    chat["messages"].pop()
+            chat["messages"].pop()
 
 
-            except Exception as exc:
+        except Exception as exc:
+
+            with st.chat_message(
+                "assistant"
+            ):
 
                 st.error(
-                    "Something went wrong while contacting Groq. "
-                    "Please try again."
+                    "Something went wrong while "
+                    "contacting Groq. Please try again."
                 )
 
 
-                print(
-                    f"RacharlaGPT error: "
-                    f"{type(exc).__name__}: {exc}"
-                )
+            # Remove unsaved user message
+
+            chat["messages"].pop()
 
 
-                if (
-                    chat["messages"]
-                    and chat["messages"][-1]["role"]
-                    == "user"
-                ):
-
-                    chat["messages"].pop()
+            print(
+                "RacharlaGPT error:",
+                type(exc).__name__,
+                str(exc),
+            )
 
 
 # ============================================================
@@ -2040,10 +1836,14 @@ Please wait for the quota window to reset and try again.
 
 st.markdown(
     """
-    <div class="chat-footer-note">
-        RacharlaGPT • Powered by Groq •
-        Chats stored securely in Supabase •
-        AI can make mistakes, so verify important information.
+    <div style="
+        text-align:center;
+        color:#9aa0ad;
+        font-size:11px;
+        margin-top:15px;
+        padding-bottom:10px;
+    ">
+        RacharlaGPT • Powered by Groq • Chats stored in Supabase
     </div>
     """,
     unsafe_allow_html=True,

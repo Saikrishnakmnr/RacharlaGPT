@@ -1,6 +1,5 @@
 import os
 import uuid
-import time
 from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -11,7 +10,6 @@ from groq import RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
-from streamlit_cookies_controller import CookieController
 
 
 # ============================================================
@@ -42,6 +40,70 @@ MODEL_OPTIONS = [
     PRIMARY_MODEL,
     BACKUP_MODEL,
 ]
+
+# ManaTechSaavy course intelligence. These choices only guide the AI;
+# they do not change your existing chat database, authentication, or UI.
+COURSE_OPTIONS = [
+    "Auto Detect",
+    "Python",
+    "SQL",
+    "Excel",
+    "Power BI",
+    "JavaScript",
+    "Coding",
+    "Data Analytics",
+]
+
+LEARNING_MODES = [
+    "Auto (best for the question)",
+    "Learn — understand the concept",
+    "Practice — exercises with hints",
+    "Build — real-world project",
+    "Interview — job preparation",
+    "Debug — find and fix mistakes",
+]
+
+LEVELS = [
+    "Auto Detect",
+    "Beginner",
+    "Intermediate",
+    "Advanced",
+]
+
+ANSWER_STYLES = [
+    "Balanced",
+    "Simple and step-by-step",
+    "Professional and concise",
+    "Detailed with examples",
+]
+
+
+COURSE_INTELLIGENCE_PROMPT = """
+You are the dedicated practical learning instructor inside RacharlaGPT for ManaTechSaavy.
+The learning areas are Python, SQL, Excel, Power BI, JavaScript, Coding, and Data Analytics.
+The teaching philosophy is: LEARN -> PRACTICE -> BUILD -> GROW.
+The audience includes students, beginners changing careers, job seekers, and working professionals.
+
+COURSE TEACHING RULES:
+1. Identify the user's intent and teach at the selected level without making the student feel judged.
+2. Prefer practical, job-relevant examples over abstract theory.
+3. For technical questions, explain the idea first, then show a correct example, then give a small practice task when useful.
+4. For code, use clean runnable examples, explain important lines, and point out common mistakes.
+5. For SQL, use realistic tables/data and show the query plus expected result when useful.
+6. For Excel, give the exact formula/function and explain where to place it; mention common mistakes such as wrong ranges or cell references.
+7. For Power BI, distinguish Power Query, data modeling, DAX, and report/visual steps clearly when relevant.
+8. For JavaScript, prefer modern, readable examples and explain browser/DOM concepts when relevant.
+9. For Data Analytics, connect the workflow across Excel, SQL, Python, and Power BI when that helps.
+10. For interview questions, give the answer, why it is correct, and a short interview-ready response.
+11. For practice mode, do not immediately reveal the full answer unless the learner asks; start with a hint or guided steps.
+12. For build mode, propose realistic mini-projects with requirements, steps, validation, and extension ideas.
+13. For debug mode, identify the error, explain the cause, provide the corrected version, and show how to prevent it.
+14. When a question is outside these courses, answer it normally instead of forcing a course connection.
+15. Understand Indian English, common learner wording, typos, and phonetic spelling.
+16. Never invent facts, functions, syntax, or tool behavior. If something depends on a version, say so.
+17. Use headings, numbered steps, tables, code blocks, examples, and checklists when they improve learning.
+18. Keep simple answers simple; increase depth when the learner asks for detail.
+"""
 
 
 DEFAULT_SYSTEM_PROMPT = """
@@ -146,129 +208,6 @@ if "supabase_client" not in st.session_state:
     )
 
 supabase: Client = st.session_state.supabase_client
-
-
-# ============================================================
-# PERSISTENT LOGIN
-# ============================================================
-# Browser cookies keep the Supabase session across Streamlit refreshes.
-# The user's password is never stored.
-# Existing secrets remain exactly: GROQ_API_KEY, SUPABASE_URL, SUPABASE_KEY.
-# ============================================================
-
-AUTH_ACCESS_COOKIE = "racharlagpt_access"
-AUTH_REFRESH_COOKIE = "racharlagpt_refresh"
-AUTH_COOKIE_DAYS = 30
-AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * AUTH_COOKIE_DAYS
-
-
-def get_cookie_controller():
-    if "cookie_controller" not in st.session_state:
-        st.session_state.cookie_controller = CookieController(
-            key="racharlagpt_auth"
-        )
-    return st.session_state.cookie_controller
-
-
-def save_auth_cookie(session):
-    if not session:
-        return
-
-    access_token = getattr(session, "access_token", None)
-    refresh_token = getattr(session, "refresh_token", None)
-    if not access_token or not refresh_token:
-        return
-
-    controller = get_cookie_controller()
-
-    try:
-        controller.set(
-            AUTH_ACCESS_COOKIE,
-            access_token,
-            key="save_access",
-            path="/",
-            max_age=AUTH_COOKIE_MAX_AGE,
-            secure=True,
-            same_site="lax",
-        )
-        controller.set(
-            AUTH_REFRESH_COOKIE,
-            refresh_token,
-            key="save_refresh",
-            path="/",
-            max_age=AUTH_COOKIE_MAX_AGE,
-            secure=True,
-            same_site="lax",
-        )
-    except Exception as exc:
-        print("RacharlaGPT cookie save error:", type(exc).__name__, str(exc))
-
-
-def clear_auth_cookie():
-    try:
-        controller = get_cookie_controller()
-        controller.remove(AUTH_ACCESS_COOKIE, key="remove_access")
-        controller.remove(AUTH_REFRESH_COOKIE, key="remove_refresh")
-    except Exception as exc:
-        print("RacharlaGPT cookie clear error:", type(exc).__name__, str(exc))
-
-
-def restore_auth_from_cookie():
-    if "auth_user" in st.session_state:
-        return True
-
-    controller = get_cookie_controller()
-
-    try:
-        cookies = controller.getAll()
-    except Exception as exc:
-        print("RacharlaGPT cookie read error:", type(exc).__name__, str(exc))
-        return False
-
-    # CookieController performs a browser round-trip. On a fresh Streamlit
-    # session, allow that response to arrive without hiding the login UI.
-    if cookies is None:
-        time.sleep(0.8)
-        try:
-            cookies = controller.getAll()
-        except Exception:
-            cookies = {}
-
-    if not cookies:
-        return False
-
-    access_token = cookies.get(AUTH_ACCESS_COOKIE)
-    refresh_token = cookies.get(AUTH_REFRESH_COOKIE)
-    if not access_token or not refresh_token:
-        return False
-
-    try:
-        response = supabase.auth.set_session(
-            access_token,
-            refresh_token,
-        )
-
-        if response.user and response.session:
-            st.session_state.auth_user = response.user
-            # Persist the newest pair after Supabase refresh-token rotation.
-            save_auth_cookie(response.session)
-            return True
-
-    except Exception as exc:
-        print("RacharlaGPT session restore error:", type(exc).__name__, str(exc))
-        clear_auth_cookie()
-
-    return False
-
-
-def sync_auth_cookie_from_current_session():
-    try:
-        response = supabase.auth.get_session()
-        session = getattr(response, "session", None)
-        if session:
-            save_auth_cookie(session)
-    except Exception as exc:
-        print("RacharlaGPT session sync error:", type(exc).__name__, str(exc))
 
 
 # ============================================================
@@ -805,8 +744,7 @@ def show_auth():
                             st.session_state.auth_user = (
                                 result.user
                             )
-                            save_auth_cookie(result.session)
-                            time.sleep(0.5)
+
                             st.rerun()
 
                         else:
@@ -894,8 +832,7 @@ def show_auth():
                             st.session_state.auth_user = (
                                 result.user
                             )
-                            save_auth_cookie(result.session)
-                            time.sleep(0.5)
+
                             st.rerun()
 
                         else:
@@ -938,15 +875,12 @@ def show_auth():
 
 if "auth_user" not in st.session_state:
 
-    restored = restore_auth_from_cookie()
+    show_auth()
 
-    if not restored:
-        show_auth()
-        st.stop()
+    st.stop()
+
 
 auth_user = st.session_state.auth_user
-
-sync_auth_cookie_from_current_session()
 USER_ID = str(auth_user.id)
 
 
@@ -1001,6 +935,18 @@ if "selected_model" not in st.session_state:
 
 if "temperature" not in st.session_state:
     st.session_state.temperature = 0.7
+
+if "course_focus" not in st.session_state:
+    st.session_state.course_focus = "Auto Detect"
+
+if "learning_mode" not in st.session_state:
+    st.session_state.learning_mode = "Auto (best for the question)"
+
+if "learner_level" not in st.session_state:
+    st.session_state.learner_level = "Auto Detect"
+
+if "answer_style" not in st.session_state:
+    st.session_state.answer_style = "Balanced"
 
 
 # ============================================================
@@ -1174,8 +1120,18 @@ def ask(chat):
 
     recent = chat["messages"][-MAX_CONTEXT_MESSAGES:]
 
+    course_context = (
+        COURSE_INTELLIGENCE_PROMPT
+        + "\nSELECTED COURSE FOCUS: " + st.session_state.course_focus
+        + "\nSELECTED LEARNING MODE: " + st.session_state.learning_mode
+        + "\nLEARNER LEVEL: " + st.session_state.learner_level
+        + "\nANSWER STYLE: " + st.session_state.answer_style
+    )
+
     system_content = (
         st.session_state.system_prompt
+        + "\n\n"
+        + course_context
         + "\n\n"
         + "REAL-TIME DATE CONTEXT:\n"
         + date_context()
@@ -1377,9 +1333,6 @@ with st.sidebar:
         except Exception:
             pass
 
-        clear_auth_cookie()
-        time.sleep(0.5)
-
         for key in [
             "auth_user",
             "chats",
@@ -1387,6 +1340,10 @@ with st.sidebar:
             "loaded_from_supabase",
             "selected_model",
             "temperature",
+            "course_focus",
+            "learning_mode",
+            "learner_level",
+            "answer_style",
         ]:
 
             st.session_state.pop(
@@ -1507,6 +1464,62 @@ with st.sidebar:
 
                 delete_chat(chat_id)
                 st.rerun()
+
+
+    st.divider()
+
+
+    # ========================================================
+    # MANA TECH SAAVY LEARNING CENTER
+    # ========================================================
+
+    with st.expander("🎓 Learning Center", expanded=True):
+
+        st.caption(
+            "Choose how RacharlaGPT should teach. "
+            "You can change these anytime."
+        )
+
+        st.session_state.course_focus = st.selectbox(
+            "Course focus",
+            COURSE_OPTIONS,
+            index=COURSE_OPTIONS.index(
+                st.session_state.course_focus
+            ),
+            help=(
+                "Auto Detect lets RacharlaGPT identify the course "
+                "from your question."
+            ),
+        )
+
+        st.session_state.learning_mode = st.selectbox(
+            "Learning mode",
+            LEARNING_MODES,
+            index=LEARNING_MODES.index(
+                st.session_state.learning_mode
+            ),
+        )
+
+        st.session_state.learner_level = st.selectbox(
+            "Your level",
+            LEVELS,
+            index=LEVELS.index(
+                st.session_state.learner_level
+            ),
+        )
+
+        st.session_state.answer_style = st.selectbox(
+            "Answer style",
+            ANSWER_STYLES,
+            index=ANSWER_STYLES.index(
+                st.session_state.answer_style
+            ),
+        )
+
+        st.info(
+            "💡 Tip: Ask for a lesson, practice questions, "
+            "a project, interview preparation, or debugging help."
+        )
 
 
     st.divider()
@@ -1762,6 +1775,11 @@ with st.sidebar:
             st.session_state.system_prompt = (
                 DEFAULT_SYSTEM_PROMPT
             )
+
+            st.session_state.course_focus = "Auto Detect"
+            st.session_state.learning_mode = "Auto (best for the question)"
+            st.session_state.learner_level = "Auto Detect"
+            st.session_state.answer_style = "Balanced"
 
             st.rerun()
 

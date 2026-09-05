@@ -371,6 +371,27 @@ st.markdown(
         padding-right: 9px;
     }
 
+    /* Google SSO Divider */
+    .divider-container {
+        display: flex;
+        align-items: center;
+        text-align: center;
+        margin: 15px 0;
+        color: #8a94a6;
+        font-size: 12px;
+    }
+    .divider-container::before, .divider-container::after {
+        content: '';
+        flex: 1;
+        border-bottom: 1px solid #e1e5ec;
+    }
+    .divider-container:not(:empty)::before {
+        margin-right: .5em;
+    }
+    .divider-container:not(:empty)::after {
+        margin-left: .5em;
+    }
+
 
     /* ========================================================
        MAIN BRANDING
@@ -448,7 +469,7 @@ st.markdown(
     }
 
     section[data-testid="stSidebar"] .stDownloadButton button {
-        border-radius: 9px;
+        border-radius: 99px;
         min-height: 37px;
     }
 
@@ -577,19 +598,33 @@ st.markdown(
 
 
 # ============================================================
-# SESSION PERSISTENCE MANAGEMENT (QUERY PARAMS + LOCAL STORAGE)
+# SESSION PERSISTENCE MANAGEMENT (QUERY PARAMS + GOOGLE OAUTH)
 # ============================================================
 
 def restore_session():
-    """Attempt to restore user session using query params or localStorage backstop."""
+    """Attempt to restore user session using query params or OAuth callback handling."""
     if "auth_user" in st.session_state and st.session_state.auth_user:
         return
 
-    # Check query params for session tokens
     params = st.query_params
     access_token = params.get("access_token")
     refresh_token = params.get("refresh_token")
+    code = params.get("code")
 
+    # Handle OAuth Callback code returned by Supabase Google Sign-In
+    if code:
+        try:
+            res = supabase.auth.exchange_code_for_session({"auth_code": code})
+            if res.user and res.session:
+                st.session_state.auth_user = res.user
+                st.query_params["access_token"] = res.session.access_token
+                st.query_params["refresh_token"] = res.session.refresh_token
+                st.query_params.pop("code", None)
+                return
+        except Exception:
+            pass
+
+    # Restore via access/refresh tokens in Query Parameters
     if access_token and refresh_token:
         try:
             res = supabase.auth.set_session(access_token, refresh_token)
@@ -718,6 +753,25 @@ def show_auth():
             """,
             unsafe_allow_html=True,
         )
+
+        # ----------------------------------------------------
+        # DIRECT GMAIL / GOOGLE SIGN-IN BUTTON
+        # ----------------------------------------------------
+        if st.button("🌐 Continue with Google (Gmail)", use_container_width=True):
+            try:
+                # Triggers Supabase Google OAuth Provider
+                res = supabase.auth.sign_in_with_oauth({
+                    "provider": "google",
+                    "options": {
+                        "redirect_to": st.query_params.get("redirect_uri", None)
+                    }
+                })
+                if res and hasattr(res, "url"):
+                    st.markdown(f'<meta http-equiv="refresh" content="0; url={res.url}">', unsafe_allow_html=True)
+            except Exception as exc:
+                st.error(f"Google sign-in failed: {exc}")
+
+        st.markdown('<div class="divider-container">OR EMAIL SIGN IN</div>', unsafe_allow_html=True)
 
         login_tab, signup_tab = st.tabs(
             [

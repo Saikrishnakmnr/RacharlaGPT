@@ -1,5 +1,6 @@
 import os
 import uuid
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -10,6 +11,7 @@ from groq import RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
+from streamlit_cookies_controller import CookieController
 
 
 # ============================================================
@@ -144,6 +146,129 @@ if "supabase_client" not in st.session_state:
     )
 
 supabase: Client = st.session_state.supabase_client
+
+
+# ============================================================
+# PERSISTENT LOGIN
+# ============================================================
+# Browser cookies keep the Supabase session across Streamlit refreshes.
+# The user's password is never stored.
+# Existing secrets remain exactly: GROQ_API_KEY, SUPABASE_URL, SUPABASE_KEY.
+# ============================================================
+
+AUTH_ACCESS_COOKIE = "racharlagpt_access"
+AUTH_REFRESH_COOKIE = "racharlagpt_refresh"
+AUTH_COOKIE_DAYS = 30
+AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * AUTH_COOKIE_DAYS
+
+
+def get_cookie_controller():
+    if "cookie_controller" not in st.session_state:
+        st.session_state.cookie_controller = CookieController(
+            key="racharlagpt_auth"
+        )
+    return st.session_state.cookie_controller
+
+
+def save_auth_cookie(session):
+    if not session:
+        return
+
+    access_token = getattr(session, "access_token", None)
+    refresh_token = getattr(session, "refresh_token", None)
+    if not access_token or not refresh_token:
+        return
+
+    controller = get_cookie_controller()
+
+    try:
+        controller.set(
+            AUTH_ACCESS_COOKIE,
+            access_token,
+            key="save_access",
+            path="/",
+            max_age=AUTH_COOKIE_MAX_AGE,
+            secure=True,
+            same_site="lax",
+        )
+        controller.set(
+            AUTH_REFRESH_COOKIE,
+            refresh_token,
+            key="save_refresh",
+            path="/",
+            max_age=AUTH_COOKIE_MAX_AGE,
+            secure=True,
+            same_site="lax",
+        )
+    except Exception as exc:
+        print("RacharlaGPT cookie save error:", type(exc).__name__, str(exc))
+
+
+def clear_auth_cookie():
+    try:
+        controller = get_cookie_controller()
+        controller.remove(AUTH_ACCESS_COOKIE, key="remove_access")
+        controller.remove(AUTH_REFRESH_COOKIE, key="remove_refresh")
+    except Exception as exc:
+        print("RacharlaGPT cookie clear error:", type(exc).__name__, str(exc))
+
+
+def restore_auth_from_cookie():
+    if "auth_user" in st.session_state:
+        return True
+
+    controller = get_cookie_controller()
+
+    try:
+        cookies = controller.getAll()
+    except Exception as exc:
+        print("RacharlaGPT cookie read error:", type(exc).__name__, str(exc))
+        return False
+
+    # CookieController performs a browser round-trip. On a fresh Streamlit
+    # session, allow that response to arrive without hiding the login UI.
+    if cookies is None:
+        time.sleep(0.8)
+        try:
+            cookies = controller.getAll()
+        except Exception:
+            cookies = {}
+
+    if not cookies:
+        return False
+
+    access_token = cookies.get(AUTH_ACCESS_COOKIE)
+    refresh_token = cookies.get(AUTH_REFRESH_COOKIE)
+    if not access_token or not refresh_token:
+        return False
+
+    try:
+        response = supabase.auth.set_session(
+            access_token,
+            refresh_token,
+        )
+
+        if response.user and response.session:
+            st.session_state.auth_user = response.user
+            # Persist the newest pair after Supabase refresh-token rotation.
+            save_auth_cookie(response.session)
+            return True
+
+    except Exception as exc:
+        print("RacharlaGPT session restore error:", type(exc).__name__, str(exc))
+        clear_auth_cookie()
+
+    return False
+
+
+def sync_auth_cookie_from_current_session():
+    try:
+        response = supabase.auth.get_session()
+        session = getattr(response, "session", None)
+        if session:
+            save_auth_cookie(session)
+    except Exception as exc:
+        print("RacharlaGPT session sync error:", type(exc).__name__, str(exc))
 
 
 # ============================================================
@@ -680,7 +805,8 @@ def show_auth():
                             st.session_state.auth_user = (
                                 result.user
                             )
-
+                            save_auth_cookie(result.session)
+                            time.sleep(0.5)
                             st.rerun()
 
                         else:
@@ -768,7 +894,8 @@ def show_auth():
                             st.session_state.auth_user = (
                                 result.user
                             )
-
+                            save_auth_cookie(result.session)
+                            time.sleep(0.5)
                             st.rerun()
 
                         else:
@@ -811,12 +938,15 @@ def show_auth():
 
 if "auth_user" not in st.session_state:
 
-    show_auth()
+    restored = restore_auth_from_cookie()
 
-    st.stop()
-
+    if not restored:
+        show_auth()
+        st.stop()
 
 auth_user = st.session_state.auth_user
+
+sync_auth_cookie_from_current_session()
 USER_ID = str(auth_user.id)
 
 
@@ -1246,6 +1376,9 @@ with st.sidebar:
             supabase.auth.sign_out()
         except Exception:
             pass
+
+        clear_auth_cookie()
+        time.sleep(0.5)
 
         for key in [
             "auth_user",

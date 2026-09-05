@@ -4,5 +4,5 @@ langchain-core
 langchain-groq
 groq
 supabase
-
+streamlit-cookies-controller==0.0.4
 

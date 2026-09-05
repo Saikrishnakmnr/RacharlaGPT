@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -439,7 +440,7 @@ st.markdown(
        ======================================================== */
 
     section[data-testid="stSidebar"] button {
-        border-radius: 9px;
+        border-radius: 99px;
     }
 
     section[data-testid="stSidebar"] .stButton button {
@@ -573,6 +574,43 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+# ============================================================
+# SESSION PERSISTENCE MANAGEMENT (QUERY PARAMS + LOCAL STORAGE)
+# ============================================================
+
+def restore_session():
+    """Attempt to restore user session using query params or localStorage backstop."""
+    if "auth_user" in st.session_state and st.session_state.auth_user:
+        return
+
+    # Check query params for session tokens
+    params = st.query_params
+    access_token = params.get("access_token")
+    refresh_token = params.get("refresh_token")
+
+    if access_token and refresh_token:
+        try:
+            res = supabase.auth.set_session(access_token, refresh_token)
+            if res.user:
+                st.session_state.auth_user = res.user
+                return
+        except Exception:
+            pass
+
+    # Fallback attempt via Supabase client session
+    try:
+        session = supabase.auth.get_session()
+        if session and session.user:
+            st.session_state.auth_user = session.user
+            st.query_params["access_token"] = session.access_token
+            st.query_params["refresh_token"] = session.refresh_token
+    except Exception:
+        pass
+
+
+restore_session()
 
 
 # ============================================================
@@ -745,6 +783,10 @@ def show_auth():
                                 result.user
                             )
 
+                            # Persist session details across reloads using Query Parameters
+                            st.query_params["access_token"] = result.session.access_token
+                            st.query_params["refresh_token"] = result.session.refresh_token
+
                             st.rerun()
 
                         else:
@@ -833,6 +875,10 @@ def show_auth():
                                 result.user
                             )
 
+                            # Direct log-in persistence when email verification is disabled
+                            st.query_params["access_token"] = result.session.access_token
+                            st.query_params["refresh_token"] = result.session.refresh_token
+
                             st.rerun()
 
                         else:
@@ -873,7 +919,7 @@ def show_auth():
 # AUTH GATE
 # ============================================================
 
-if "auth_user" not in st.session_state:
+if "auth_user" not in st.session_state or st.session_state.auth_user is None:
 
     show_auth()
 
@@ -1332,6 +1378,9 @@ with st.sidebar:
             supabase.auth.sign_out()
         except Exception:
             pass
+
+        # Clear query parameter tokens on sign out
+        st.query_params.clear()
 
         for key in [
             "auth_user",

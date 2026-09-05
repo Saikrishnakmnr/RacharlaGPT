@@ -8,7 +8,6 @@ from groq import RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
-from streamlit_cookies_manager import EncryptedCookieManager
 
 st.set_page_config(
     page_title="RacharlaGPT",
@@ -82,68 +81,7 @@ section[data-testid="stSidebar"] { background:#f7f8fc; border-right:1px solid #e
 """, unsafe_allow_html=True)
 
 
-# ---------------- Persistent browser login ----------------
-# Streamlit session_state is reset when the browser page is refreshed.
-# We therefore keep the Supabase access/refresh tokens in an encrypted
-# browser cookie and restore the Supabase session on the next Streamlit session.
-cookies = EncryptedCookieManager(
-    prefix="racharlagpt/",
-    password=SUPABASE_KEY,
-)
-
-if not cookies.ready():
-    st.stop()
-
-
-def save_login_cookie(session):
-    if not session:
-        return
-    payload = {
-        "access_token": session.access_token,
-        "refresh_token": session.refresh_token,
-    }
-    cookies["auth_session"] = json.dumps(payload)
-    cookies.save()
-
-
-def clear_login_cookie():
-    try:
-        del cookies["auth_session"]
-        cookies.save()
-    except KeyError:
-        pass
-
-
-def restore_login_from_cookie():
-    raw = cookies.get("auth_session")
-    if not raw:
-        return None
-
-    try:
-        payload = json.loads(raw)
-        access_token = payload.get("access_token")
-        refresh_token = payload.get("refresh_token")
-        if not access_token or not refresh_token:
-            return None
-
-        result = supabase.auth.set_session(access_token, refresh_token)
-        if result.session and result.user:
-            # Supabase can return a rotated refresh token. Save the newest pair.
-            save_login_cookie(result.session)
-            return result.user
-    except Exception:
-        clear_login_cookie()
-
-    return None
-
-
-if "auth_user" not in st.session_state:
-    restored_user = restore_login_from_cookie()
-    if restored_user:
-        st.session_state.auth_user = restored_user
-
 # ---------------- Authentication ----------------
-
 def show_auth():
     st.markdown("""
     <div class="auth">
@@ -173,7 +111,6 @@ def show_auth():
                             "password": password,
                         })
                         if result.user and result.session:
-                            save_login_cookie(result.session)
                             st.session_state.auth_user = result.user
                             st.rerun()
                         else:
@@ -202,7 +139,6 @@ def show_auth():
                             "password": password,
                         })
                         if result.session and result.user:
-                            save_login_cookie(result.session)
                             st.session_state.auth_user = result.user
                             st.rerun()
                         else:
@@ -378,7 +314,6 @@ with st.sidebar:
             supabase.auth.sign_out()
         except Exception:
             pass
-        clear_login_cookie()
         for key in ["auth_user", "chats", "current_chat_id", "loaded_from_supabase"]:
             st.session_state.pop(key, None)
         st.rerun()

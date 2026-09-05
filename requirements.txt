@@ -4,4 +4,4 @@ langchain-core
 langchain-groq
 groq
 supabase
-streamlit-cookies-manager
+

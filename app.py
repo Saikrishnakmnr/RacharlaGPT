@@ -652,16 +652,37 @@ st.markdown(
         }
     }
 
-    
-<style>
-.rgpt-welcome { padding: 0.4rem 0 0.9rem 0; }
-.rgpt-kicker { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; opacity: 0.7; }
-.rgpt-welcome h1 { margin: 0; padding: 0; font-size: 2rem; }
-.rgpt-welcome p { margin-top: 0.35rem; opacity: 0.78; font-size: 1rem; }
-.rgpt-feature-card { padding: 0.75rem 0.9rem; border: 1px solid rgba(128,128,128,.22); border-radius: 12px; margin-bottom: .6rem; }
-</style>
 
-</style>
+    .rgpt-welcome {
+        padding: 0.4rem 0 0.9rem 0;
+    }
+
+    .rgpt-kicker {
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        opacity: 0.7;
+    }
+
+    .rgpt-welcome h1 {
+        margin: 0;
+        padding: 0;
+        font-size: 2rem;
+    }
+
+    .rgpt-welcome p {
+        margin-top: 0.35rem;
+        opacity: 0.78;
+        font-size: 1rem;
+    }
+
+    .rgpt-feature-card {
+        padding: 0.75rem 0.9rem;
+        border: 1px solid rgba(128,128,128,.22);
+        border-radius: 12px;
+        margin-bottom: .6rem;
+    }
+
     """,
     unsafe_allow_html=True,
 )
@@ -2367,18 +2388,15 @@ if not chat["messages"]:
 
     st.markdown(
         """
-        <div class="welcome-box">
-
-            <div class="welcome-title">
+        <div style="text-align:center; padding: 8vh 12px 4vh 12px;">
+            <h1 style="font-size:31px; margin-bottom:8px;">
                 Welcome to RacharlaGPT
-            </div>
-
-            <div class="welcome-text">
-                Your conversations are saved to your account.
-                Ask questions, write code, brainstorm ideas,
+            </h1>
+            <p style="color:#707b8c; line-height:1.65; font-size:15px; margin:0 auto; max-width:680px;">
+                Your conversations are saved to your account.<br>
+                Ask questions, write code, brainstorm ideas,<br>
                 learn something new, or simply have a conversation.
-            </div>
-
+            </p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2793,3 +2811,4 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+

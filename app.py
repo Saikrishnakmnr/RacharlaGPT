@@ -763,7 +763,8 @@ def show_auth():
                 res = supabase.auth.sign_in_with_oauth({
                     "provider": "google",
                     "options": {
-                        "redirect_to": "https://racharlagpt.streamlit.app/"
+                        "redirect_to": "https://racharlagpt.streamlit.app/",
+                        "scopes": "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
                     }
                 })
                 if res and hasattr(res, "url"):
@@ -2010,6 +2011,10 @@ if user_input:
                 "content": user_input,
             }
         )
+
+        # Save the user's message immediately so the chat history is
+        # preserved even if the AI request later fails or is interrupted.
+        save_chat(chat)
 
 
         # ----------------------------------------------------

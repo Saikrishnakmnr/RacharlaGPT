@@ -13,7 +13,6 @@ from groq import Groq, RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
-from supabase.lib.client_options import ClientOptions
 
 
 # ============================================================
@@ -266,17 +265,18 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 # ============================================================
 
 if "supabase_client" not in st.session_state:
-    # Google OAuth uses PKCE. Keep one client alive across the OAuth round-trip
-    # so the verifier created when the user clicks Google remains available
-    # when Supabase returns with the one-time authorization code.
+    # IMPORTANT:
+    # Do not pass ClientOptions here. Some Streamlit Cloud environments may
+    # install supabase-py 2.24.x, where ClientOptions has a known regression:
+    # client creation can fail with:
+    # AttributeError: 'ClientOptions' object has no attribute 'storage'
+    #
+    # The plain create_client() path uses the library defaults and works
+    # across the affected versions. Keep the same client in session state so
+    # the OAuth flow can continue when Streamlit returns from Google.
     st.session_state.supabase_client = create_client(
         SUPABASE_URL,
         SUPABASE_KEY,
-        options=ClientOptions(
-            flow_type="pkce",
-            auto_refresh_token=True,
-            persist_session=True,
-        ),
     )
 
 supabase: Client = st.session_state.supabase_client

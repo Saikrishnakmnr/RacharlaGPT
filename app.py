@@ -1042,10 +1042,6 @@ def show_auth():
                         "provider": "google",
                         "options": {
                             "redirect_to": APP_URL,
-                            "scopes": "openid email profile",
-                            "query_params": {
-                                "prompt": "select_account",
-                            },
                         },
                     }
                 )

@@ -5,6 +5,7 @@ import base64
 import io
 import threading
 import hashlib
+import hmac
 import secrets
 from urllib.parse import urlencode
 import requests
@@ -266,80 +267,43 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 
 
 # ============================================================
-# SUPABASE CLIENT + MANUAL PKCE STORAGE
+# SUPABASE CLIENT + DETERMINISTIC PKCE OAUTH
 # ============================================================
 
-# The Streamlit native link button opens Google in a new browser tab. That
-# creates a new Streamlit session, so the Supabase Python SDK's normal
-# session-local PKCE verifier storage cannot reliably survive the round trip.
+# Streamlit's link button opens Google in a new browser session. A verifier
+# kept only in process/session memory can therefore disappear before the
+# callback arrives (or after an app restart).
 #
-# We therefore handle ONLY the Google PKCE handshake ourselves:
-# 1. Generate a verifier/challenge.
-# 2. Keep the verifier in a short-lived process-level store.
-# 3. Send the challenge to Supabase's OAuth authorize endpoint.
-# 4. On callback, exchange the returned code directly at Supabase's PKCE
-#    token endpoint with the exact verifier.
-# 5. Put the resulting access/refresh tokens into the normal Supabase client.
-#
-# This avoids ClientOptions storage/version issues entirely for Google OAuth.
+# We instead derive the PKCE verifier deterministically from the OAuth state
+# value and a server-side secret. The state is returned by Supabase with the
+# callback, so no browser cookie, Streamlit session, or process-local store is
+# required. The verifier itself is never sent to Google; only its challenge is.
 
-GOOGLE_PKCE_STORE = {}
-GOOGLE_PKCE_LOCK = threading.Lock()
-GOOGLE_PKCE_TTL_SECONDS = 10 * 60
-GOOGLE_PKCE_MAX_PENDING = 10
+GOOGLE_OAUTH_SECRET = hashlib.sha256(
+    f"{SUPABASE_KEY}|{GROQ_API_KEY}".encode("utf-8")
+).digest()
 
 
-def _cleanup_google_pkce():
-    now = datetime.now(timezone.utc).timestamp()
-    with GOOGLE_PKCE_LOCK:
-        expired = [
-            key
-            for key, item in GOOGLE_PKCE_STORE.items()
-            if now - item["created_at"] > GOOGLE_PKCE_TTL_SECONDS
-        ]
-        for key in expired:
-            GOOGLE_PKCE_STORE.pop(key, None)
+def _derive_google_pkce_verifier(state):
+    """Derive one stable PKCE verifier from the returned OAuth state."""
+    if not state:
+        raise ValueError("Google OAuth callback did not include the secure state parameter.")
+
+    digest = hmac.new(
+        GOOGLE_OAUTH_SECRET,
+        state.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def _create_google_pkce():
-    verifier = secrets.token_urlsafe(64)
+    """Create a state-bound PKCE challenge without storing verifier state."""
+    state = secrets.token_urlsafe(32)
+    verifier = _derive_google_pkce_verifier(state)
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    flow_id = secrets.token_urlsafe(18)
-
-    _cleanup_google_pkce()
-    with GOOGLE_PKCE_LOCK:
-        GOOGLE_PKCE_STORE[flow_id] = {
-            "verifier": verifier,
-            "created_at": datetime.now(timezone.utc).timestamp(),
-        }
-        while len(GOOGLE_PKCE_STORE) > GOOGLE_PKCE_MAX_PENDING:
-            oldest = min(
-                GOOGLE_PKCE_STORE,
-                key=lambda k: GOOGLE_PKCE_STORE[k]["created_at"],
-            )
-            GOOGLE_PKCE_STORE.pop(oldest, None)
-
-    return challenge, flow_id
-
-
-def _get_google_pkce_candidates():
-    _cleanup_google_pkce()
-    with GOOGLE_PKCE_LOCK:
-        items = sorted(
-            GOOGLE_PKCE_STORE.items(),
-            key=lambda pair: pair[1]["created_at"],
-            reverse=True,
-        )
-        return [(flow_id, item["verifier"]) for flow_id, item in items]
-
-
-def _clear_google_pkce(flow_id=None):
-    with GOOGLE_PKCE_LOCK:
-        if flow_id is None:
-            GOOGLE_PKCE_STORE.clear()
-        else:
-            GOOGLE_PKCE_STORE.pop(flow_id, None)
+    return challenge, state
 
 
 if "supabase_client" not in st.session_state:
@@ -810,52 +774,42 @@ def restore_session():
     refresh_token = params.get("refresh_token")
     code = params.get("code")
 
-    # Google/Supabase PKCE callback. We perform the token exchange directly
-    # with Supabase so the exact verifier generated before opening Google is
-    # explicitly supplied. This avoids the Streamlit-session verifier mismatch.
+    # Google/Supabase PKCE callback. The verifier is derived from the returned
+    # OAuth state, so it survives the new Streamlit session created by the
+    # Google link button and also survives an app process restart.
     if code:
-        candidates = _get_google_pkce_candidates()
-        if not candidates:
-            st.session_state.google_oauth_error = (
-                "Google sign-in expired before the secure PKCE verifier could "
-                "be recovered. Please start Google sign-in again."
-            )
+        state = params.get("state")
+        try:
+            verifier = _derive_google_pkce_verifier(state)
+        except Exception as exc:
+            st.session_state.google_oauth_error = str(exc)
         else:
-            last_error = None
             token_data = None
-            matched_flow_id = None
+            last_error = None
+            try:
+                token_url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/token?grant_type=pkce"
+                token_response = requests.post(
+                    token_url,
+                    headers={
+                        "apikey": SUPABASE_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "auth_code": code,
+                        "code_verifier": verifier,
+                    },
+                    timeout=20,
+                )
 
-            # Try the small set of recent pending verifiers. A failed PKCE
-            # verifier check does not consume the authorization code; the
-            # matching verifier completes the exchange. This also prevents
-            # one user's new-tab login from overwriting another user's login.
-            for flow_id, verifier in candidates:
-                try:
-                    token_url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/token?grant_type=pkce"
-                    token_response = requests.post(
-                        token_url,
-                        headers={
-                            "apikey": SUPABASE_KEY,
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "auth_code": code,
-                            "code_verifier": verifier,
-                        },
-                        timeout=20,
-                    )
-
-                    if token_response.ok:
-                        token_data = token_response.json()
-                        matched_flow_id = flow_id
-                        break
-
+                if token_response.ok:
+                    token_data = token_response.json()
+                else:
                     try:
                         last_error = token_response.json()
                     except Exception:
                         last_error = token_response.text
-                except Exception as exc:
-                    last_error = str(exc)
+            except Exception as exc:
+                last_error = str(exc)
 
             if not token_data:
                 st.session_state.google_oauth_error = (
@@ -877,15 +831,15 @@ def restore_session():
                             "Google session was exchanged, but Supabase did not return a user."
                         )
 
-                    _clear_google_pkce(matched_flow_id)
                     st.session_state.auth_user = res.user
                     st.query_params["access_token"] = access_token
                     st.query_params["refresh_token"] = refresh_token
                     st.query_params.pop("code", None)
+                    st.query_params.pop("state", None)
                     st.query_params.pop("logged_out", None)
                     st.session_state.pop("google_oauth_error", None)
                     st.session_state.pop("google_oauth_url", None)
-                    st.session_state.pop("google_oauth_flow_id", None)
+                    st.session_state.pop("google_oauth_state", None)
                     st.rerun()
                     return
                 except Exception as exc:
@@ -1046,13 +1000,13 @@ def show_auth():
         # ONE-CLICK GOOGLE / GMAIL SIGN-IN
         # ----------------------------------------------------
         # Start one explicit PKCE flow and use a native Streamlit link button
-        # so Google opens in a real browser tab. The verifier is stored in
-        # the short-lived shared slot above and is supplied explicitly during
-        # the callback token exchange.
+        # so Google opens in a real browser tab. The verifier is derived from
+        # the returned OAuth state, so it does not depend on the Streamlit
+        # session surviving the Google round trip.
         if "google_oauth_url" not in st.session_state:
             try:
-                challenge, flow_id = _create_google_pkce()
-                st.session_state.google_oauth_flow_id = flow_id
+                challenge, state = _create_google_pkce()
+                st.session_state.google_oauth_state = state
 
                 query = urlencode(
                     {
@@ -1060,6 +1014,7 @@ def show_auth():
                         "redirect_to": APP_URL,
                         "code_challenge": challenge,
                         "code_challenge_method": "s256",
+                        "state": state,
                     }
                 )
                 google_oauth_url = (
@@ -1095,9 +1050,8 @@ def show_auth():
             if st.button("🔄 Try Google sign-in again", use_container_width=True):
                 st.session_state.pop("google_oauth_error", None)
                 st.session_state.pop("google_oauth_url", None)
-                st.session_state.pop("google_oauth_flow_id", None)
-                _clear_google_pkce()
-                st.query_params.pop("oauth_flow", None)
+                st.session_state.pop("google_oauth_state", None)
+                st.query_params.pop("state", None)
                 st.rerun()
 
         st.markdown('<div class="divider-container">OR OTHER SIGN-IN OPTIONS</div>', unsafe_allow_html=True)
@@ -2060,7 +2014,7 @@ with st.sidebar:
             pass
 
         # Clear query parameter tokens on sign out
-        _clear_google_pkce()
+        
         st.query_params.clear()
         st.query_params["logged_out"] = "1"
 

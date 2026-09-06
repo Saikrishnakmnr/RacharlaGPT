@@ -298,11 +298,14 @@ def _derive_google_pkce_verifier(state):
 
 
 def _create_google_pkce():
-    """Create a state-bound PKCE challenge without storing verifier state."""
-    state = secrets.token_urlsafe(32)
-    verifier = _derive_google_pkce_verifier(state)
+    """Create a PKCE challenge with the verifier carried by OAuth state."""
+    # The verifier is itself a cryptographically random PKCE-safe value.
+    # Sending it as OAuth state lets the callback recover the exact verifier
+    # without Streamlit session state, cookies, or process-local storage.
+    verifier = secrets.token_urlsafe(64)
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    state = verifier
     return challenge, state
 
 
@@ -780,7 +783,13 @@ def restore_session():
     if code:
         state = params.get("state")
         try:
-            verifier = _derive_google_pkce_verifier(state)
+            if not state:
+                raise ValueError("Google OAuth callback did not include the secure state parameter.")
+            # In the current flow, state is the PKCE verifier itself.
+            # Keep the strict length check required by PKCE.
+            verifier = state
+            if not (43 <= len(verifier) <= 128):
+                raise ValueError("Google OAuth returned an invalid PKCE state value.")
         except Exception as exc:
             st.session_state.google_oauth_error = str(exc)
         else:
@@ -1027,11 +1036,24 @@ def show_auth():
         google_oauth_url = st.session_state.get("google_oauth_url")
 
         if google_oauth_url:
-            st.link_button(
-                "🔵  Continue with Google (Gmail)",
-                google_oauth_url,
-                use_container_width=True,
-                type="primary",
+            # IMPORTANT: st.link_button always opens a new browser tab/new
+            # Streamlit session. For OAuth, keep the round trip in the same
+            # browser tab so the callback returns directly to this app.
+            # st.html is not iframed, so this anchor performs a normal same-tab
+            # browser navigation to Google.
+            safe_google_url = escape(google_oauth_url, quote=True)
+            st.html(
+                f"""
+                <a href=\"{safe_google_url}\" target=\"_self\"
+                   style=\"display:flex;align-items:center;justify-content:center;
+                          width:100%;min-height:43px;box-sizing:border-box;
+                          border-radius:10px;background:#ff4b4b;color:white;
+                          text-decoration:none;font-weight:700;font-size:16px;
+                          font-family:inherit;cursor:pointer;"
+                   aria-label=\"Continue with Google (Gmail)\">
+                    🔵&nbsp;&nbsp;Continue with Google (Gmail)
+                </a>
+                """
             )
         else:
             st.error("Google sign-in could not be started.")

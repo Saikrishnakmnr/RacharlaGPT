@@ -148,6 +148,21 @@ IMPORTANT BEHAVIOR:
 18. When a user asks to analyze, review, improve, optimize, refactor, fix, or "make this better", use this workflow when applicable: ANALYZE -> IDENTIFY ISSUES -> IMPROVE -> SHOW THE BETTER VERSION -> EXPLAIN WHY -> SUGGEST NEXT STEPS. For code, preserve working behavior unless the user asks for a redesign.
 19. If the user says "analyze and make better" or similar wording, treat it as an explicit request for both diagnosis and an improved result, not just general advice.
 20. If the user attaches an image, screenshot, screen chat, diagram, chart, or photo, use the attachment context to answer the user's question. Do not ignore the attachment.
+
+21. Preserve the strongest existing teaching-assistant behavior. Do not reduce teaching quality when adding broader assistant capabilities.
+22. Educational answers should be readable, structured, and student-friendly. Prefer: Direct answer -> Key idea -> Step-by-step explanation -> Example -> Common mistakes -> Quick recap -> Practice/next step, when appropriate.
+23. For Python, SQL, Excel, Power BI, JavaScript, coding, data analytics, AI, databases, statistics and related technical topics, explain at the learner's level, use clean examples, explain important code lines, and show expected output when useful.
+24. For notes and study requests, use clear headings, numbered steps, bullets, concise definitions, examples, memory tips, and exam/interview points. Avoid large walls of text.
+25. Keep simple questions simple, but provide enough explanation to make the answer understandable and actionable.
+26. When the user asks to "analyze and make better", use ANALYZE -> IDENTIFY ISSUES -> IMPROVE -> SHOW BETTER VERSION -> EXPLAIN WHY -> NEXT STEPS.
+27. Continue answering general questions normally. Do not force general questions into programming or courses.
+28. Keep the interface welcoming and student-focused. After successful login, greet the user naturally using their available display name when present.
+29. If an authenticated profile provides a safe public avatar/photo URL, the UI may display it as the user's profile image. Never expose private tokens or sensitive account information.
+30. Allow users to optionally upload a profile photo and use it as a local profile avatar. Do not require a photo.
+31. Add a concise Getting Started area for new users explaining Learn, Practice, Build, Analyze, Upload, Voice, and General Assistant capabilities.
+32. Keep the UI clean and readable: clear hierarchy, compact cards, consistent spacing, accessible contrast, and no excessive decoration.
+33. Preserve all existing teaching-assistant readability, structured notes, course intelligence, authentication, chat history, exports, image/document handling, and voice capabilities while improving the UI.
+
 21. If the user attaches a document or data file, use its extracted contents as source context when answering. Clearly distinguish what comes from the attachment from general knowledge.
 22. For voice input, treat the transcription as the user's actual question. Do not complain about spelling or transcription imperfections; infer obvious speech-recognition errors from context.
 23. Never claim to have seen or read an attachment when no usable attachment context is available.
@@ -637,7 +652,16 @@ st.markdown(
         }
     }
 
-    </style>
+    
+<style>
+.rgpt-welcome { padding: 0.4rem 0 0.9rem 0; }
+.rgpt-kicker { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; opacity: 0.7; }
+.rgpt-welcome h1 { margin: 0; padding: 0; font-size: 2rem; }
+.rgpt-welcome p { margin-top: 0.35rem; opacity: 0.78; font-size: 1rem; }
+.rgpt-feature-card { padding: 0.75rem 0.9rem; border: 1px solid rgba(128,128,128,.22); border-radius: 12px; margin-bottom: .6rem; }
+</style>
+
+</style>
     """,
     unsafe_allow_html=True,
 )
@@ -1073,6 +1097,10 @@ if "auth_user" not in st.session_state or st.session_state.auth_user is None:
 
 
 auth_user = st.session_state.auth_user
+
+# Enhanced post-login welcome UI
+render_rgpt_welcome(auth_user)
+render_rgpt_getting_started()
 USER_ID = str(auth_user.id)
 
 
@@ -1677,6 +1705,17 @@ if not st.session_state.loaded_from_supabase:
 # ============================================================
 
 with st.sidebar:
+
+    with st.expander("👤 Profile photo", expanded=False):
+        st.caption("Optional. Your Google avatar is used when available.")
+        uploaded_avatar = st.file_uploader(
+            "Choose a photo",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="profile_avatar_upload",
+        )
+        if uploaded_avatar is not None:
+            st.session_state["profile_avatar_bytes"] = uploaded_avatar.getvalue()
+            st.session_state["profile_avatar_name"] = uploaded_avatar.name
 
     # --------------------------------------------------------
     # LOGO + BRAND
@@ -2699,3 +2738,57 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+def _rgpt_display_name(user):
+    metadata = getattr(user, "user_metadata", None) or {}
+    name = metadata.get("full_name") or metadata.get("name") or metadata.get("user_name")
+    if name:
+        return str(name).strip()
+    email = getattr(user, "email", None)
+    return str(email).split("@")[0] if email else "Learner"
+
+def _rgpt_avatar_url(user):
+    metadata = getattr(user, "user_metadata", None) or {}
+    url = metadata.get("avatar_url") or metadata.get("picture")
+    return url if isinstance(url, str) and url.startswith(("https://", "http://")) else None
+
+def render_rgpt_welcome(user):
+    name = _rgpt_display_name(user)
+    avatar = _rgpt_avatar_url(user)
+    left, right = st.columns([5, 1])
+    with left:
+        st.markdown(
+            f'<div class="rgpt-welcome"><div class="rgpt-kicker">WELCOME TO RACHARLAGPT</div>'
+            f'<h1>Hi, {name} 👋</h1>'
+            f'<p>Your learning, coding, data, AI, career and everyday assistant.</p></div>',
+            unsafe_allow_html=True,
+        )
+    with right:
+        local_avatar = st.session_state.get("profile_avatar_bytes")
+        if local_avatar:
+            st.image(local_avatar, width=76)
+        elif avatar:
+            try:
+                st.image(avatar, width=76)
+            except Exception:
+                pass
+
+def render_rgpt_getting_started():
+    with st.expander("✨ New here? Start with RacharlaGPT", expanded=False):
+        st.markdown(
+            """
+**📚 Learn** — Python, SQL, Excel, Power BI, JavaScript, Data Analytics, AI and more.
+
+**🧪 Practice** — quizzes, coding challenges, SQL exercises and interview questions.
+
+**🏗️ Build** — real-world projects, datasets, dashboards, portfolios and step-by-step guidance.
+
+**🔍 Analyze** — screenshots, errors, charts, documents, resumes and study material.
+
+**🎙️ Voice** — speak your question and continue from the transcription.
+
+**💬 General Assistant** — ask everyday questions too.
+
+**Try:** “Teach me SQL from beginner to advanced” • “Analyze this screenshot” • “Give me a project and evaluate my solution.”
+"""
+        )
+

@@ -1,13 +1,15 @@
 import os
 import uuid
 import json
+import base64
+import io
 from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from html import escape
 
 import streamlit as st
-from groq import RateLimitError
+from groq import Groq, RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
@@ -36,6 +38,8 @@ CREATOR_CREDIT = f"Created and developed by {CREATOR_NAME}"
 
 PRIMARY_MODEL = "openai/gpt-oss-20b"
 BACKUP_MODEL = "llama-3.1-8b-instant"
+VISION_MODEL = "qwen/qwen3.6-27b"
+TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
 
 MAX_CONTEXT_MESSAGES = 14
 
@@ -84,7 +88,7 @@ ANSWER_STYLES = [
 
 COURSE_INTELLIGENCE_PROMPT = """
 You are the dedicated practical learning instructor inside RacharlaGPT for ManaTechSaavy.
-The learning areas are Python, SQL, Excel, Power BI, JavaScript, Coding, and Data Analytics.
+The core learning areas are Python, SQL, Excel, Power BI, JavaScript, Coding, Data Analytics, and related programming/technology topics. Treat these as an expanding teaching-assistant scope rather than a closed list.
 The teaching philosophy is: LEARN -> PRACTICE -> BUILD -> GROW.
 The audience includes students, beginners changing careers, job seekers, and working professionals.
 
@@ -102,11 +106,12 @@ COURSE TEACHING RULES:
 11. For practice mode, do not immediately reveal the full answer unless the learner asks; start with a hint or guided steps.
 12. For build mode, propose realistic mini-projects with requirements, steps, validation, and extension ideas.
 13. For debug mode, identify the error, explain the cause, provide the corrected version, and show how to prevent it.
-14. When a question is outside these courses, answer it normally instead of forcing a course connection.
-15. Understand Indian English, common learner wording, typos, and phonetic spelling.
-16. Never invent facts, functions, syntax, or tool behavior. If something depends on a version, say so.
-17. Use headings, numbered steps, tables, code blocks, examples, and checklists when they improve learning.
-18. Keep simple answers simple; increase depth when the learner asks for detail.
+14. For other programming, software, technology, computer science, AI, databases, statistics, career, interview, productivity, education, or general questions, answer helpfully even when they are outside the named core courses. Do not force every question into a course.
+15. For medical/MBBS study requests, act as an educational study assistant. Do not provide pirated or unauthorized copyrighted textbook PDFs or links. Instead, offer legal/open-access resources when appropriate, explain topics, create notes, summaries, flashcards, MCQs, study plans, and help analyze user-provided material. For diagnosis or treatment questions, clearly distinguish educational information from professional medical advice.
+16. Understand Indian English, common learner wording, typos, and phonetic spelling.
+17. Never invent facts, functions, syntax, or tool behavior. If something depends on a version, say so.
+18. Use headings, numbered steps, tables, code blocks, examples, and checklists when they improve learning.
+19. Keep simple answers simple; increase depth when the learner asks for detail.
 """
 
 
@@ -142,6 +147,10 @@ IMPORTANT BEHAVIOR:
 17. Do not claim a different creator or developer.
 18. When a user asks to analyze, review, improve, optimize, refactor, fix, or "make this better", use this workflow when applicable: ANALYZE -> IDENTIFY ISSUES -> IMPROVE -> SHOW THE BETTER VERSION -> EXPLAIN WHY -> SUGGEST NEXT STEPS. For code, preserve working behavior unless the user asks for a redesign.
 19. If the user says "analyze and make better" or similar wording, treat it as an explicit request for both diagnosis and an improved result, not just general advice.
+20. If the user attaches an image, screenshot, screen chat, diagram, chart, or photo, use the attachment context to answer the user's question. Do not ignore the attachment.
+21. If the user attaches a document or data file, use its extracted contents as source context when answering. Clearly distinguish what comes from the attachment from general knowledge.
+22. For voice input, treat the transcription as the user's actual question. Do not complain about spelling or transcription imperfections; infer obvious speech-recognition errors from context.
+23. Never claim to have seen or read an attachment when no usable attachment context is available.
 """
 
 
@@ -1309,11 +1318,213 @@ def current_chat():
     ]
 
 
+
+# ============================================================
+# ATTACHMENTS, IMAGES, AND VOICE
+# ============================================================
+
+VISION_MAX_IMAGES = 5
+VISION_MAX_BYTES = 3_500_000
+
+
+def _image_bytes_for_vision(uploaded_file):
+    """Return a compact JPEG/PNG byte payload suitable for Groq vision."""
+    raw = uploaded_file.getvalue()
+    if len(raw) <= VISION_MAX_BYTES:
+        return raw, uploaded_file.type or "image/jpeg"
+
+    try:
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(raw)).convert("RGB")
+        image.thumbnail((2400, 2400))
+        output = io.BytesIO()
+        quality = 88
+        while quality >= 55:
+            output.seek(0)
+            output.truncate(0)
+            image.save(output, format="JPEG", quality=quality, optimize=True)
+            data = output.getvalue()
+            if len(data) <= VISION_MAX_BYTES:
+                return data, "image/jpeg"
+            quality -= 8
+    except Exception:
+        pass
+
+    return raw, uploaded_file.type or "image/jpeg"
+
+
+def analyze_image_attachment(uploaded_file, question):
+    """Use a Groq vision model to inspect an attached screenshot/photo/image."""
+    image_bytes, mime_type = _image_bytes_for_vision(uploaded_file)
+
+    if len(image_bytes) > VISION_MAX_BYTES:
+        raise ValueError(
+            f"{uploaded_file.name} is too large for image analysis. "
+            "Please upload a smaller screenshot/image."
+        )
+
+    encoded = base64.b64encode(image_bytes).decode("utf-8")
+    if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        mime_type = "image/jpeg"
+
+    client = Groq(api_key=GROQ_API_KEY)
+    completion = client.chat.completions.create(
+        model=VISION_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are the visual-analysis component of RacharlaGPT. "
+                    "Inspect the supplied image carefully. Extract visible text, "
+                    "code, errors, tables, charts, UI elements, and other relevant "
+                    "details. Do not invent details that are not visible."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Analyze this attachment for the user's question.\n\n"
+                            f"USER QUESTION:\n{question}\n\n"
+                            "Return useful factual visual context that another assistant "
+                            "can use to answer the question. Preserve code and important "
+                            "visible text accurately."
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{encoded}"
+                        },
+                    },
+                ],
+            },
+        ],
+        temperature=0,
+        max_completion_tokens=4096,
+    )
+    return completion.choices[0].message.content or ""
+
+
+def extract_text_attachment(uploaded_file):
+    """Extract useful text from common document/data attachments."""
+    name = uploaded_file.name.lower()
+    data = uploaded_file.getvalue()
+
+    if name.endswith((".txt", ".md", ".py", ".sql", ".js", ".json", ".csv", ".ts", ".html", ".css")):
+        return data.decode("utf-8", errors="replace")[:120000]
+
+    if name.endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(data))
+            parts = []
+            for page in reader.pages[:80]:
+                parts.append(page.extract_text() or "")
+            text = "\n\n".join(parts).strip()
+            return text[:120000] if text else "[PDF contains no extractable text; it may be scanned/image-only.]"
+        except ImportError:
+            return "[PDF text extraction is unavailable because pypdf is not installed.]"
+        except Exception as exc:
+            return f"[Could not extract PDF text: {exc}]"
+
+    if name.endswith(".docx"):
+        try:
+            from docx import Document
+
+            doc = Document(io.BytesIO(data))
+            text = "\n".join(p.text for p in doc.paragraphs)
+            return text[:120000]
+        except ImportError:
+            return "[DOCX extraction is unavailable because python-docx is not installed.]"
+        except Exception as exc:
+            return f"[Could not extract DOCX text: {exc}]"
+
+    if name.endswith((".xlsx", ".xlsm")):
+        try:
+            from openpyxl import load_workbook
+
+            wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+            parts = []
+            for ws in wb.worksheets[:10]:
+                parts.append(f"### Sheet: {ws.title}")
+                for row in ws.iter_rows(max_row=300, values_only=True):
+                    parts.append(" | ".join("" if v is None else str(v) for v in row))
+            return "\n".join(parts)[:120000]
+        except ImportError:
+            return "[Excel extraction is unavailable because openpyxl is not installed.]"
+        except Exception as exc:
+            return f"[Could not extract Excel data: {exc}]"
+
+    return (
+        f"[Unsupported attachment type: {uploaded_file.name}. "
+        "Please use an image, PDF, DOCX, TXT, CSV, XLSX, or common code/text file.]"
+    )
+
+
+def build_attachment_context(uploaded_files, question):
+    """Turn current uploads into compact context for the normal RacharlaGPT answer."""
+    if not uploaded_files:
+        return ""
+
+    image_files = [
+        f for f in uploaded_files
+        if (f.type or "").startswith("image/")
+        or f.name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
+    ]
+
+    parts = []
+    if image_files:
+        for image_file in image_files[:VISION_MAX_IMAGES]:
+            try:
+                visual = analyze_image_attachment(image_file, question)
+                parts.append(
+                    f"ATTACHED IMAGE/SCREENSHOT: {image_file.name}\n{visual}"
+                )
+            except Exception as exc:
+                parts.append(
+                    f"ATTACHED IMAGE/SCREENSHOT: {image_file.name}\n"
+                    f"[Image analysis failed: {exc}]"
+                )
+
+    for file in uploaded_files:
+        if file in image_files[:VISION_MAX_IMAGES]:
+            continue
+        text = extract_text_attachment(file)
+        parts.append(f"ATTACHED FILE: {file.name}\n{text}")
+
+    if not parts:
+        return ""
+
+    return (
+        "\n\nATTACHMENT CONTEXT — USE THIS WHEN RELEVANT:\n"
+        + "\n\n---\n\n".join(parts)
+    )
+
+
+def transcribe_voice(audio_file):
+    """Convert microphone audio to text using Groq Whisper."""
+    client = Groq(api_key=GROQ_API_KEY)
+    audio_bytes = audio_file.getvalue()
+
+    result = client.audio.transcriptions.create(
+        file=(audio_file.name or "voice.wav", audio_bytes),
+        model=TRANSCRIPTION_MODEL,
+        response_format="json",
+        temperature=0,
+    )
+    return (result.text or "").strip()
+
+
 # ============================================================
 # AI RESPONSE
 # ============================================================
 
-def ask(chat):
+def ask(chat, latest_model_context=""):
 
     recent = chat["messages"][-MAX_CONTEXT_MESSAGES:]
 
@@ -1342,9 +1553,15 @@ def ask(chat):
 
         if message["role"] == "user":
 
+            user_content = message["content"]
+            if message is recent[-1] and latest_model_context:
+                user_content += latest_model_context
+            elif message.get("model_context"):
+                user_content += message.get("model_context", "")
+
             msgs.append(
                 HumanMessage(
-                    content=message["content"]
+                    content=user_content
                 )
             )
 
@@ -2146,12 +2363,195 @@ with st.expander("📥 Download current chat", expanded=False):
 
 
 # ============================================================
+# ATTACHMENTS
+# ============================================================
+
+with st.expander("📎 Attach image, screenshot, PDF, document, or data", expanded=False):
+    uploaded_files = st.file_uploader(
+        "Attach files for RacharlaGPT to read or analyze",
+        type=[
+            "png", "jpg", "jpeg", "webp", "gif",
+            "pdf", "docx", "txt", "md", "csv",
+            "xlsx", "xlsm", "py", "sql", "js", "ts", "json", "html", "css",
+        ],
+        accept_multiple_files=True,
+        key="chat_attachments",
+        help=(
+            "Attach screenshots, screen chats, images, PDFs, documents, spreadsheets, "
+            "or code. Ask your question in the chat box and RacharlaGPT will use the "
+            "attachment as context."
+        ),
+    )
+
+if uploaded_files:
+    st.caption(
+        "Attached: " + ", ".join(f.name for f in uploaded_files[:8])
+        + (" …" if len(uploaded_files) > 8 else "")
+    )
+
+
+# ============================================================
+# VOICE INPUT
+# ============================================================
+
+with st.expander("🎙️ Ask by voice", expanded=False):
+    voice_audio = st.audio_input(
+        "Record your question",
+        sample_rate=16000,
+        key="voice_question_input",
+        help="Speak your question. RacharlaGPT will convert it to text and use it as your search/question.",
+    )
+
+    if voice_audio:
+        voice_bytes = voice_audio.getvalue()
+        import hashlib
+
+        voice_hash = hashlib.sha256(voice_bytes).hexdigest()
+
+        if st.session_state.get("voice_audio_hash") != voice_hash:
+            with st.spinner("Converting voice to text…"):
+                try:
+                    transcript = transcribe_voice(voice_audio)
+                    st.session_state.voice_audio_hash = voice_hash
+                    st.session_state.voice_transcript = transcript
+                except Exception as exc:
+                    st.session_state.voice_audio_hash = voice_hash
+                    st.session_state.voice_transcript = ""
+                    st.session_state.voice_error = str(exc)
+
+        if st.session_state.get("voice_transcript"):
+            st.text_area(
+                "Transcribed question",
+                value=st.session_state.voice_transcript,
+                height=100,
+                key="voice_transcript_preview",
+            )
+            send_voice = st.button(
+                "🎙️ Send transcribed question",
+                use_container_width=True,
+                key="send_voice_question",
+            )
+        else:
+            send_voice = False
+            if st.session_state.get("voice_error"):
+                st.error(
+                    "Voice transcription failed. "
+                    + st.session_state.voice_error
+                )
+    else:
+        send_voice = False
+
+
+# ============================================================
 # CHAT INPUT
 # ============================================================
 
-user_input = st.chat_input(
+typed_input = st.chat_input(
     "Message RacharlaGPT..."
 )
+
+user_input = typed_input
+if send_voice and st.session_state.get("voice_transcript"):
+    user_input = st.session_state.voice_transcript
+
+
+def process_user_message(user_input, attachment_context=""):
+    user_input = user_input.strip()
+    if not user_input:
+        return
+
+    chat = current_chat()
+
+    # Keep the visible user message clean while giving the model the attachment context.
+    model_user_content = user_input
+    if attachment_context:
+        model_user_content += attachment_context
+
+    chat["messages"].append(
+        {
+            "role": "user",
+            "content": user_input,
+            "model_context": attachment_context,
+        }
+    )
+
+    if chat["title"] == "New Chat":
+        chat["title"] = title_for(user_input)
+
+    try:
+        save_chat(chat)
+    except Exception as save_exc:
+        st.warning(
+            f"Your message is visible, but could not be saved to Supabase: {save_exc}"
+        )
+
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+        if attachment_context:
+            st.caption("📎 Attachment context included")
+
+    try:
+        with st.chat_message("assistant"):
+            with st.spinner("RacharlaGPT is thinking…"):
+                response, used = ask(chat, latest_model_context=attachment_context)
+
+            answer = response.content
+            if not isinstance(answer, str):
+                answer = str(answer)
+
+            st.markdown(answer)
+
+            if used == "backup":
+                st.caption(
+                    "Primary model was rate-limited; "
+                    f"answered with {BACKUP_MODEL}."
+                )
+
+        chat["messages"].append(
+            {
+                "role": "assistant",
+                "content": answer,
+            }
+        )
+
+        save_chat(chat)
+        st.rerun()
+
+    except RateLimitError:
+        with st.chat_message("assistant"):
+            st.warning(
+                "Groq rate limit reached. Please wait for the quota to reset "
+                "and try again."
+            )
+        try:
+            save_chat(chat)
+        except Exception:
+            pass
+
+    except Exception as exc:
+        with st.chat_message("assistant"):
+            st.error(f"RacharlaGPT could not complete the request: {exc}")
+        try:
+            save_chat(chat)
+        except Exception:
+            pass
+
+
+if user_input:
+    attachment_context = build_attachment_context(
+        uploaded_files if "uploaded_files" in locals() else [],
+        user_input,
+    )
+
+    if send_voice:
+        st.session_state.voice_transcript = ""
+        st.session_state.voice_error = ""
+
+    process_user_message(
+        user_input,
+        attachment_context=attachment_context,
+    )
 
 
 if user_input:

@@ -1,51 +1,37 @@
-# ============================================================
-# OAUTH CALLBACK & CODE EXCHANGE FIX
-# ============================================================
+# 1. IMPORTS FIRST
+import streamlit as st
+from supabase import create_client, Client
 
+# 2. INITIALIZE SUPABASE & SESSION STATES SECOND
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_ANON_KEY"]
+
+if "supabase_client" not in st.session_state:
+    st.session_state.supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase: Client = st.session_state.supabase_client
+
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None
+
+# 3. DEFINE RESTORE_SESSION FUNCTION THIRD
 def restore_session():
-    """Handles session restoration and prevents PKCE code verifier errors."""
     if st.session_state.get("auth_user"):
         return
 
     params = st.query_params
     code = params.get("code")
-    access_token = params.get("access_token")
-    refresh_token = params.get("refresh_token")
 
-    # 1. Direct restore via access/refresh tokens
-    if access_token and refresh_token:
-        try:
-            res = supabase.auth.set_session(access_token, refresh_token)
-            if res and res.user:
-                st.session_state.auth_user = res.user
-                return
-        except Exception:
-            pass
-
-    # 2. Safe PKCE Code Exchange
     if code:
         try:
             res = supabase.auth.exchange_code_for_session({"auth_code": code})
             if res and res.user:
                 st.session_state.auth_user = res.user
                 st.query_params.clear()
-                st.session_state.pop("google_oauth_error", None)
-                st.session_state.pop("google_oauth_url", None)
                 st.rerun()
-                return
-        except Exception as exc:
-            # Clear stale code query parameter so the error screen vanishes
-            st.session_state.google_oauth_error = str(exc)
+        except Exception:
+            # Clear stale PKCE code parameter to prevent loop error
             st.query_params.pop("code", None)
-            st.query_params.pop("oauth_flow", None)
 
-    # 3. Memory fallback
-    try:
-        session = supabase.auth.get_session()
-        if session and session.user:
-            st.session_state.auth_user = session.user
-    except Exception:
-        pass
-
-
+# 4. CALL RESTORE_SESSION AFTER DEFINITION
 restore_session()

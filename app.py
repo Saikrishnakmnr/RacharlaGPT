@@ -752,6 +752,7 @@ def restore_session():
                 st.query_params.pop("code", None)
                 st.query_params.pop("logged_out", None)
                 st.session_state.pop("google_oauth_error", None)
+                st.session_state.pop("google_oauth_url", None)
                 st.rerun()
                 return
         except Exception as exc:
@@ -910,21 +911,22 @@ def show_auth():
         # ----------------------------------------------------
         # ONE-CLICK GOOGLE / GMAIL SIGN-IN
         # ----------------------------------------------------
-        # IMPORTANT: do NOT create an OAuth URL while the login page is
-        # merely rendering. Creating a new PKCE flow on every Streamlit
-        # rerun can replace the verifier from the previous flow.
-        # Create the flow only after the user actually clicks Google.
-        if st.button(
-            "🔵  Continue with Google (Gmail)",
-            use_container_width=True,
-            type="primary",
-        ):
+        # Streamlit renders custom HTML inside its app frame. The previous
+        # version tried to navigate with JavaScript, but the browser can block
+        # that navigation from the embedded frame.
+        #
+        # Instead, create the Supabase OAuth URL once and use a real HTML
+        # link with target="_top". Clicking it performs a normal top-level
+        # browser navigation to Google, which is the correct OAuth behavior.
+        # The URL is stored in session state so we do not recreate the PKCE
+        # flow on every Streamlit rerun.
+        if "google_oauth_url" not in st.session_state:
             try:
                 oauth_response = supabase.auth.sign_in_with_oauth(
                     {
                         "provider": "google",
                         "options": {
-                            "redirect_to": "https://racharlagpt.streamlit.app/",
+                            "redirect_to": APP_URL,
                         },
                     }
                 )
@@ -936,25 +938,30 @@ def show_auth():
                         "Supabase did not return a Google OAuth authorization URL."
                     )
 
-                # Navigate immediately. The OAuth URL is created only once,
-                # at the moment the user clicks the button.
-                safe_oauth_url = escape(google_oauth_url, quote=True)
-                st.markdown(
-                    f"""
-                    <script>
-                        window.top.location.href = {json.dumps(google_oauth_url)};
-                    </script>
-                    <meta http-equiv="refresh" content="0;url={safe_oauth_url}">
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.info("Opening Google sign-in…")
-                st.stop()
+                st.session_state.google_oauth_url = google_oauth_url
 
             except Exception as exc:
-                st.error("Google sign-in could not be started.")
-                with st.expander("Google sign-in diagnostic"):
-                    st.code(str(exc))
+                st.session_state.google_oauth_error = str(exc)
+
+        google_oauth_url = st.session_state.get("google_oauth_url")
+
+        if google_oauth_url:
+            safe_oauth_url = escape(google_oauth_url, quote=True)
+            st.markdown(
+                f"""
+                <a href="{safe_oauth_url}" target="_top" rel="noopener noreferrer"
+                   style="display:flex;align-items:center;justify-content:center;
+                          width:100%;box-sizing:border-box;padding:0.58rem 1rem;
+                          border-radius:0.5rem;background:#ff4b4b;color:white;
+                          text-decoration:none;font-weight:600;font-size:1rem;
+                          border:1px solid #ff4b4b;cursor:pointer;">
+                    🔵&nbsp;&nbsp;Continue with Google (Gmail)
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.error("Google sign-in could not be started.")
 
         st.caption(
             "One click • Use your Google account • No RacharlaGPT password to remember"
@@ -969,6 +976,7 @@ def show_auth():
                 st.code(st.session_state.google_oauth_error)
             if st.button("🔄 Try Google sign-in again", use_container_width=True):
                 st.session_state.pop("google_oauth_error", None)
+                st.session_state.pop("google_oauth_url", None)
                 st.rerun()
 
         st.markdown('<div class="divider-container">OR OTHER SIGN-IN OPTIONS</div>', unsafe_allow_html=True)
@@ -1936,6 +1944,8 @@ with st.sidebar:
 
         for key in [
             "auth_user",
+            "google_oauth_url",
+            "google_oauth_error",
             "chats",
             "current_chat_id",
             "loaded_from_supabase",

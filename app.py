@@ -1098,6 +1098,61 @@ if "auth_user" not in st.session_state or st.session_state.auth_user is None:
 
 auth_user = st.session_state.auth_user
 
+def _rgpt_display_name(user):
+    metadata = getattr(user, "user_metadata", None) or {}
+    name = metadata.get("full_name") or metadata.get("name") or metadata.get("user_name")
+    if name:
+        return str(name).strip()
+    email = getattr(user, "email", None)
+    return str(email).split("@")[0] if email else "Learner"
+
+def _rgpt_avatar_url(user):
+    metadata = getattr(user, "user_metadata", None) or {}
+    url = metadata.get("avatar_url") or metadata.get("picture")
+    return url if isinstance(url, str) and url.startswith(("https://", "http://")) else None
+
+def render_rgpt_welcome(user):
+    name = _rgpt_display_name(user)
+    avatar = _rgpt_avatar_url(user)
+    left, right = st.columns([5, 1])
+    with left:
+        st.markdown(
+            f'<div class="rgpt-welcome"><div class="rgpt-kicker">WELCOME TO RACHARLAGPT</div>'
+            f'<h1>Hi, {name} 👋</h1>'
+            f'<p>Your learning, coding, data, AI, career and everyday assistant.</p></div>',
+            unsafe_allow_html=True,
+        )
+    with right:
+        local_avatar = st.session_state.get("profile_avatar_bytes")
+        if local_avatar:
+            st.image(local_avatar, width=76)
+        elif avatar:
+            try:
+                st.image(avatar, width=76)
+            except Exception:
+                pass
+
+def render_rgpt_getting_started():
+    with st.expander("✨ New here? Start with RacharlaGPT", expanded=False):
+        st.markdown(
+            """
+**📚 Learn** — Python, SQL, Excel, Power BI, JavaScript, Data Analytics, AI and more.
+
+**🧪 Practice** — quizzes, coding challenges, SQL exercises and interview questions.
+
+**🏗️ Build** — real-world projects, datasets, dashboards, portfolios and step-by-step guidance.
+
+**🔍 Analyze** — screenshots, errors, charts, documents, resumes and study material.
+
+**🎙️ Voice** — speak your question and continue from the transcription.
+
+**💬 General Assistant** — ask everyday questions too.
+
+**Try:** “Teach me SQL from beginner to advanced” • “Analyze this screenshot” • “Give me a project and evaluate my solution.”
+"""
+        )
+
+
 # Enhanced post-login welcome UI
 render_rgpt_welcome(auth_user)
 render_rgpt_getting_started()
@@ -2738,57 +2793,3 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-def _rgpt_display_name(user):
-    metadata = getattr(user, "user_metadata", None) or {}
-    name = metadata.get("full_name") or metadata.get("name") or metadata.get("user_name")
-    if name:
-        return str(name).strip()
-    email = getattr(user, "email", None)
-    return str(email).split("@")[0] if email else "Learner"
-
-def _rgpt_avatar_url(user):
-    metadata = getattr(user, "user_metadata", None) or {}
-    url = metadata.get("avatar_url") or metadata.get("picture")
-    return url if isinstance(url, str) and url.startswith(("https://", "http://")) else None
-
-def render_rgpt_welcome(user):
-    name = _rgpt_display_name(user)
-    avatar = _rgpt_avatar_url(user)
-    left, right = st.columns([5, 1])
-    with left:
-        st.markdown(
-            f'<div class="rgpt-welcome"><div class="rgpt-kicker">WELCOME TO RACHARLAGPT</div>'
-            f'<h1>Hi, {name} 👋</h1>'
-            f'<p>Your learning, coding, data, AI, career and everyday assistant.</p></div>',
-            unsafe_allow_html=True,
-        )
-    with right:
-        local_avatar = st.session_state.get("profile_avatar_bytes")
-        if local_avatar:
-            st.image(local_avatar, width=76)
-        elif avatar:
-            try:
-                st.image(avatar, width=76)
-            except Exception:
-                pass
-
-def render_rgpt_getting_started():
-    with st.expander("✨ New here? Start with RacharlaGPT", expanded=False):
-        st.markdown(
-            """
-**📚 Learn** — Python, SQL, Excel, Power BI, JavaScript, Data Analytics, AI and more.
-
-**🧪 Practice** — quizzes, coding challenges, SQL exercises and interview questions.
-
-**🏗️ Build** — real-world projects, datasets, dashboards, portfolios and step-by-step guidance.
-
-**🔍 Analyze** — screenshots, errors, charts, documents, resumes and study material.
-
-**🎙️ Voice** — speak your question and continue from the transcription.
-
-**💬 General Assistant** — ask everyday questions too.
-
-**Try:** “Teach me SQL from beginner to advanced” • “Analyze this screenshot” • “Give me a project and evaluate my solution.”
-"""
-        )
-

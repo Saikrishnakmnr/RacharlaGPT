@@ -651,3 +651,4 @@ st.markdown(
     '<div class="chat-footer-note">RacharlaGPT • Powered by Groq • AI can make mistakes, so verify important information.</div>',
     unsafe_allow_html=True,
 )
+

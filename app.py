@@ -13,6 +13,7 @@ from groq import Groq, RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
+from supabase.lib.client_options import ClientOptions
 
 
 # ============================================================
@@ -32,6 +33,7 @@ st.set_page_config(
 # ============================================================
 
 APP_NAME = "RacharlaGPT"
+APP_URL = "https://racharlagpt.streamlit.app/"
 CREATOR_NAME = "Racharla Saikrishna"
 SUPPORTERS_NAME = "RSKT"
 CREATOR_CREDIT = f"Created and developed by {CREATOR_NAME}"
@@ -264,9 +266,17 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 # ============================================================
 
 if "supabase_client" not in st.session_state:
+    # Google OAuth uses PKCE. Keep one client alive across the OAuth round-trip
+    # so the verifier created when the user clicks Google remains available
+    # when Supabase returns with the one-time authorization code.
     st.session_state.supabase_client = create_client(
         SUPABASE_URL,
         SUPABASE_KEY,
+        options=ClientOptions(
+            flow_type="pkce",
+            auto_refresh_token=True,
+            persist_session=True,
+        ),
     )
 
 supabase: Client = st.session_state.supabase_client
@@ -717,7 +727,7 @@ st.markdown(
 # ============================================================
 
 def restore_session():
-    """Attempt to restore user session using query params or OAuth callback handling."""
+    """Restore an existing session or complete the Google OAuth PKCE callback."""
     if "auth_user" in st.session_state and st.session_state.auth_user:
         return
 
@@ -729,7 +739,9 @@ def restore_session():
     refresh_token = params.get("refresh_token")
     code = params.get("code")
 
-    # Handle OAuth Callback code returned by Supabase Google Sign-In
+    # Google/Supabase PKCE callback. The same Supabase client must be used
+    # here as the one that created the OAuth URL so its code verifier remains
+    # available for the one-time code exchange.
     if code:
         try:
             res = supabase.auth.exchange_code_for_session({"auth_code": code})
@@ -739,27 +751,33 @@ def restore_session():
                 st.query_params["refresh_token"] = res.session.refresh_token
                 st.query_params.pop("code", None)
                 st.query_params.pop("logged_out", None)
+                st.session_state.pop("google_oauth_error", None)
+                st.rerun()
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            st.session_state.google_oauth_error = str(exc)
 
-    # Restore via access/refresh tokens in Query Parameters
+    # Restore via access/refresh tokens (used by email/password login and
+    # by callbacks that return tokens directly).
     if access_token and refresh_token:
         try:
             res = supabase.auth.set_session(access_token, refresh_token)
             if res.user:
                 st.session_state.auth_user = res.user
+                st.query_params.pop("logged_out", None)
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            st.session_state.google_oauth_error = str(exc)
 
-    # Fallback attempt via Supabase client session
+    # Fallback to any session already held by the Supabase client.
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.auth_user = session.user
-            st.query_params["access_token"] = session.access_token
-            st.query_params["refresh_token"] = session.refresh_token
+            if getattr(session, "access_token", None):
+                st.query_params["access_token"] = session.access_token
+            if getattr(session, "refresh_token", None):
+                st.query_params["refresh_token"] = session.refresh_token
             st.query_params.pop("logged_out", None)
     except Exception:
         pass
@@ -890,215 +908,265 @@ def show_auth():
         )
 
         # ----------------------------------------------------
-        # DIRECT GMAIL / GOOGLE SIGN-IN BUTTON
+        # ONE-CLICK GOOGLE / GMAIL SIGN-IN
         # ----------------------------------------------------
-        if st.button("🌐 Continue with Google (Gmail)", use_container_width=True):
+        # IMPORTANT: do NOT create an OAuth URL while the login page is
+        # merely rendering. Creating a new PKCE flow on every Streamlit
+        # rerun can replace the verifier from the previous flow.
+        # Create the flow only after the user actually clicks Google.
+        if st.button(
+            "🔵  Continue with Google (Gmail)",
+            use_container_width=True,
+            type="primary",
+        ):
             try:
-                # Triggers Supabase Google OAuth Provider
-                res = supabase.auth.sign_in_with_oauth({
-                    "provider": "google",
-                    "options": {
-                        "redirect_to": "https://racharlagpt.streamlit.app/"
+                oauth_response = supabase.auth.sign_in_with_oauth(
+                    {
+                        "provider": "google",
+                        "options": {
+                            "redirect_to": "https://racharlagpt.streamlit.app/",
+                        },
                     }
-                })
-                if res and hasattr(res, "url"):
-                    st.markdown(f'<meta http-equiv="refresh" content="0; url={res.url}">', unsafe_allow_html=True)
-            except Exception as exc:
-                st.error(f"Google sign-in failed: {exc}")
-
-        st.markdown('<div class="divider-container">OR EMAIL SIGN IN</div>', unsafe_allow_html=True)
-
-        login_tab, signup_tab = st.tabs(
-            [
-                "🔐 Sign In",
-                "✨ Create Account",
-            ]
-        )
-
-
-        # ====================================================
-        # SIGN IN
-        # ====================================================
-
-        with login_tab:
-
-            with st.form("login_form"):
-
-                email = st.text_input(
-                    "Email",
-                    key="login_email",
-                    placeholder="you@example.com",
                 )
 
-                password = st.text_input(
-                    "Password",
-                    type="password",
-                    key="login_password",
-                    placeholder="Enter your password",
-                )
+                google_oauth_url = getattr(oauth_response, "url", None)
 
-                submit = st.form_submit_button(
-                    "Sign In",
-                    type="primary",
-                    use_container_width=True,
-                )
-
-
-            if submit:
-
-                if not email.strip() or not password:
-
-                    st.warning(
-                        "Enter your email and password."
+                if not google_oauth_url:
+                    raise RuntimeError(
+                        "Supabase did not return a Google OAuth authorization URL."
                     )
 
-                else:
+                # Navigate immediately. The OAuth URL is created only once,
+                # at the moment the user clicks the button.
+                safe_oauth_url = escape(google_oauth_url, quote=True)
+                st.markdown(
+                    f"""
+                    <script>
+                        window.top.location.href = {json.dumps(google_oauth_url)};
+                    </script>
+                    <meta http-equiv="refresh" content="0;url={safe_oauth_url}">
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.info("Opening Google sign-in…")
+                st.stop()
 
-                    try:
+            except Exception as exc:
+                st.error("Google sign-in could not be started.")
+                with st.expander("Google sign-in diagnostic"):
+                    st.code(str(exc))
 
-                        result = (
-                            supabase.auth
-                            .sign_in_with_password(
+        st.caption(
+            "One click • Use your Google account • No RacharlaGPT password to remember"
+        )
+
+        if st.session_state.get("google_oauth_error"):
+            st.error(
+                "Google sign-in returned to RacharlaGPT, but the secure session "
+                "exchange failed. Please start Google sign-in again."
+            )
+            with st.expander("Google sign-in diagnostic"):
+                st.code(st.session_state.google_oauth_error)
+            if st.button("🔄 Try Google sign-in again", use_container_width=True):
+                st.session_state.pop("google_oauth_error", None)
+                st.rerun()
+
+        st.markdown('<div class="divider-container">OR OTHER SIGN-IN OPTIONS</div>', unsafe_allow_html=True)
+
+        # Keep email/password available as a secondary option, but do not
+        # make new users deal with it unless they actually want it.
+        with st.expander("Use email and password instead"):
+            login_tab, signup_tab = st.tabs(
+                [
+                    "🔐 Sign In",
+                    "✨ Create Account",
+                ]
+            )
+
+
+            # ====================================================
+            # SIGN IN
+            # ====================================================
+
+            with login_tab:
+
+                with st.form("login_form"):
+
+                    email = st.text_input(
+                        "Email",
+                        key="login_email",
+                        placeholder="you@example.com",
+                    )
+
+                    password = st.text_input(
+                        "Password",
+                        type="password",
+                        key="login_password",
+                        placeholder="Enter your password",
+                    )
+
+                    submit = st.form_submit_button(
+                        "Sign In",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+
+                if submit:
+
+                    if not email.strip() or not password:
+
+                        st.warning(
+                            "Enter your email and password."
+                        )
+
+                    else:
+
+                        try:
+
+                            result = (
+                                supabase.auth
+                                .sign_in_with_password(
+                                    {
+                                        "email": email.strip(),
+                                        "password": password,
+                                    }
+                                )
+                            )
+
+                            if result.user and result.session:
+
+                                st.session_state.auth_user = (
+                                    result.user
+                                )
+
+                                # Persist session details across reloads using Query Parameters
+                                st.query_params["access_token"] = result.session.access_token
+                                st.query_params["refresh_token"] = result.session.refresh_token
+                                st.query_params.pop("logged_out", None)
+
+                                st.rerun()
+
+                            else:
+
+                                st.error(
+                                    "Sign in failed. "
+                                    "Please check your email and password."
+                                )
+
+                        except Exception as exc:
+
+                            st.error(
+                                f"Sign in failed: {exc}"
+                            )
+
+
+            # ====================================================
+            # CREATE ACCOUNT
+            # ====================================================
+
+            with signup_tab:
+
+                with st.form("signup_form"):
+
+                    email = st.text_input(
+                        "Email",
+                        key="signup_email",
+                        placeholder="you@example.com",
+                    )
+
+                    password = st.text_input(
+                        "Password",
+                        type="password",
+                        key="signup_password",
+                        placeholder="Create a password",
+                    )
+
+                    confirm = st.text_input(
+                        "Confirm password",
+                        type="password",
+                        key="signup_confirm",
+                        placeholder="Repeat your password",
+                    )
+
+                    submit = st.form_submit_button(
+                        "Create Account",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+
+                if submit:
+
+                    if not email.strip() or not password:
+
+                        st.warning(
+                            "Enter your email and password."
+                        )
+
+                    elif password != confirm:
+
+                        st.warning(
+                            "Passwords do not match."
+                        )
+
+                    elif len(password) < 6:
+
+                        st.warning(
+                            "Password must be at least 6 characters."
+                        )
+
+                    else:
+
+                        try:
+
+                            result = supabase.auth.sign_up(
                                 {
                                     "email": email.strip(),
                                     "password": password,
                                 }
                             )
-                        )
 
-                        if result.user and result.session:
+                            if result.session and result.user:
 
-                            st.session_state.auth_user = (
-                                result.user
-                            )
+                                st.session_state.auth_user = (
+                                    result.user
+                                )
 
-                            # Persist session details across reloads using Query Parameters
-                            st.query_params["access_token"] = result.session.access_token
-                            st.query_params["refresh_token"] = result.session.refresh_token
-                            st.query_params.pop("logged_out", None)
+                                # Direct log-in persistence when email verification is disabled
+                                st.query_params["access_token"] = result.session.access_token
+                                st.query_params["refresh_token"] = result.session.refresh_token
+                                st.query_params.pop("logged_out", None)
 
-                            st.rerun()
+                                st.rerun()
 
-                        else:
+                            else:
+
+                                st.success(
+                                    "Account created. "
+                                    "You can now sign in."
+                                )
+
+                        except Exception as exc:
 
                             st.error(
-                                "Sign in failed. "
-                                "Please check your email and password."
+                                f"Account creation failed: {exc}"
                             )
 
-                    except Exception as exc:
 
-                        st.error(
-                            f"Sign in failed: {exc}"
-                        )
-
-
-        # ====================================================
-        # CREATE ACCOUNT
-        # ====================================================
-
-        with signup_tab:
-
-            with st.form("signup_form"):
-
-                email = st.text_input(
-                    "Email",
-                    key="signup_email",
-                    placeholder="you@example.com",
-                )
-
-                password = st.text_input(
-                    "Password",
-                    type="password",
-                    key="signup_password",
-                    placeholder="Create a password",
-                )
-
-                confirm = st.text_input(
-                    "Confirm password",
-                    type="password",
-                    key="signup_confirm",
-                    placeholder="Repeat your password",
-                )
-
-                submit = st.form_submit_button(
-                    "Create Account",
-                    type="primary",
-                    use_container_width=True,
-                )
-
-
-            if submit:
-
-                if not email.strip() or not password:
-
-                    st.warning(
-                        "Enter your email and password."
-                    )
-
-                elif password != confirm:
-
-                    st.warning(
-                        "Passwords do not match."
-                    )
-
-                elif len(password) < 6:
-
-                    st.warning(
-                        "Password must be at least 6 characters."
-                    )
-
-                else:
-
-                    try:
-
-                        result = supabase.auth.sign_up(
-                            {
-                                "email": email.strip(),
-                                "password": password,
-                            }
-                        )
-
-                        if result.session and result.user:
-
-                            st.session_state.auth_user = (
-                                result.user
-                            )
-
-                            # Direct log-in persistence when email verification is disabled
-                            st.query_params["access_token"] = result.session.access_token
-                            st.query_params["refresh_token"] = result.session.refresh_token
-                            st.query_params.pop("logged_out", None)
-
-                            st.rerun()
-
-                        else:
-
-                            st.success(
-                                "Account created. "
-                                "You can now sign in."
-                            )
-
-                    except Exception as exc:
-
-                        st.error(
-                            f"Account creation failed: {exc}"
-                        )
-
-
-        st.markdown(
-            """
-            <div style="
-                text-align:center;
-                color:#8a94a6;
-                font-size:11px;
-                margin-top:11px;
-            ">
-                🔒 Your chat history is securely stored in Supabase.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            st.markdown(
+                """
+                <div style="
+                    text-align:center;
+                    color:#8a94a6;
+                    font-size:11px;
+                    margin-top:11px;
+                ">
+                    🔒 Your chat history is securely stored in Supabase.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
         st.markdown(
             '</div>',
@@ -2811,4 +2879,3 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-

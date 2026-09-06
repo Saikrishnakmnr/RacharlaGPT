@@ -322,6 +322,94 @@ supabase: Client = st.session_state.supabase_client
 
 
 # ============================================================
+# BROWSER SESSION PERSISTENCE BRIDGE
+# ============================================================
+BROWSER_AUTH_STORAGE_KEY = "racharlagpt_supabase_session_v1"
+
+def render_browser_session_bridge():
+    st.html(
+        f"""
+        <script>
+        (function () {{
+            try {{
+                const STORAGE_KEY = {json.dumps(BROWSER_AUTH_STORAGE_KEY)};
+                const url = new URL(window.location.href);
+                const params = url.searchParams;
+                if (params.get('logged_out') === '1') {{
+                    localStorage.removeItem(STORAGE_KEY);
+                    return;
+                }}
+                const hash = window.location.hash;
+                if (hash && hash.length > 1) {{
+                    const fragment = new URLSearchParams(hash.substring(1));
+                    const access = fragment.get('access_token');
+                    const refresh = fragment.get('refresh_token');
+                    const error = fragment.get('error_description') || fragment.get('error');
+                    if (error) {{
+                        const clean = new URL(window.location.href);
+                        clean.hash = '';
+                        clean.searchParams.set('google_oauth_error', error);
+                        window.location.replace(clean.toString());
+                        return;
+                    }}
+                    if (access && refresh) {{
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify({{access_token: access, refresh_token: refresh}}));
+                        const callback = new URL(window.location.href);
+                        callback.hash = '';
+                        callback.searchParams.set('access_token', access);
+                        callback.searchParams.set('refresh_token', refresh);
+                        window.location.replace(callback.toString());
+                        return;
+                    }}
+                }}
+                if (!params.get('access_token') && !params.get('refresh_token')) {{
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (raw) {{
+                        try {{
+                            const saved = JSON.parse(raw);
+                            if (saved.access_token && saved.refresh_token) {{
+                                const restore = new URL(window.location.href);
+                                restore.searchParams.set('access_token', saved.access_token);
+                                restore.searchParams.set('refresh_token', saved.refresh_token);
+                                window.location.replace(restore.toString());
+                            }}
+                        }} catch (e) {{
+                            localStorage.removeItem(STORAGE_KEY);
+                        }}
+                    }}
+                }}
+            }} catch (e) {{
+                console.error('RacharlaGPT browser session bridge:', e);
+            }}
+        }})();
+        </script>
+        """,
+        unsafe_allow_javascript=True,
+    )
+
+def sync_session_to_browser():
+    try:
+        session = supabase.auth.get_session()
+        if not session:
+            return
+        access = getattr(session, "access_token", None)
+        refresh = getattr(session, "refresh_token", None)
+        if not access or not refresh:
+            return
+        payload = json.dumps({"access_token": access, "refresh_token": refresh})
+        st.html(
+            f"""
+            <script>
+            try {{ localStorage.setItem({json.dumps(BROWSER_AUTH_STORAGE_KEY)}, {json.dumps(payload)}); }} catch (e) {{}}
+            </script>
+            """,
+            unsafe_allow_javascript=True,
+        )
+    except Exception:
+        pass
+
+
+# ============================================================
 # INDIA DATE / TIME CONTEXT
 # ============================================================
 
@@ -766,8 +854,9 @@ st.markdown(
 # ============================================================
 
 def restore_session():
-    """Restore a Supabase session from query parameters."""
+    """Restore a Supabase session from OAuth/query/browser persistence."""
     if "auth_user" in st.session_state and st.session_state.auth_user:
+        sync_session_to_browser()
         return
 
     params = st.query_params
@@ -777,40 +866,45 @@ def restore_session():
     access_token = params.get("access_token")
     refresh_token = params.get("refresh_token")
     browser_oauth_error = params.get("google_oauth_error")
+
     if browser_oauth_error:
         st.session_state.google_oauth_error = browser_oauth_error
         st.query_params.pop("google_oauth_error", None)
 
-    # Google implicit-flow callback is handled in the browser first.
-    # The browser bridge converts the URL fragment into query parameters,
-    # because URL fragments are intentionally never sent to Streamlit's server.
     if access_token and refresh_token:
         try:
             res = supabase.auth.set_session(access_token, refresh_token)
             if res.user:
                 st.session_state.auth_user = res.user
+                st.session_state.google_oauth_error = None
+                st.query_params.pop("access_token", None)
+                st.query_params.pop("refresh_token", None)
                 st.query_params.pop("logged_out", None)
+                sync_session_to_browser()
                 return
             raise RuntimeError("Supabase returned no user for the Google session.")
         except Exception as exc:
-            st.session_state.google_oauth_error = (
-                f"Google session could not be restored: {exc}"
-            )
+            st.session_state.google_oauth_error = f"Google session could not be restored: {exc}"
 
     try:
         session = supabase.auth.get_session()
         if session and session.user:
             st.session_state.auth_user = session.user
-            if getattr(session, "access_token", None):
-                st.query_params["access_token"] = session.access_token
-            if getattr(session, "refresh_token", None):
-                st.query_params["refresh_token"] = session.refresh_token
+            st.query_params.pop("access_token", None)
+            st.query_params.pop("refresh_token", None)
             st.query_params.pop("logged_out", None)
+            sync_session_to_browser()
     except Exception:
         pass
 
 
 restore_session()
+
+# Only unauthenticated browser sessions need the browser bridge. Once
+# restore_session() succeeds, rendering it again would repeatedly inject
+# saved tokens into the URL.
+if "auth_user" not in st.session_state or st.session_state.auth_user is None:
+    render_browser_session_bridge()
 
 
 # ============================================================
@@ -948,6 +1042,10 @@ def show_auth():
                         "provider": "google",
                         "options": {
                             "redirect_to": APP_URL,
+                            "scopes": "openid email profile",
+                            "query_params": {
+                                "prompt": "select_account",
+                            },
                         },
                     }
                 )
@@ -987,47 +1085,8 @@ def show_auth():
                 unsafe_allow_html=True,
             )
 
-            # Supabase implicit OAuth returns the session in the browser URL
-            # fragment. Fragments are not sent to Streamlit's Python server.
-            # Streamlit 1.56+ can execute this small trusted callback bridge.
-            st.html(
-                """
-                <script>
-                (function () {
-                    try {
-                        const hash = window.location.hash;
-                        if (!hash || hash.length < 2) return;
-
-                        const fragment = new URLSearchParams(hash.substring(1));
-                        const access = fragment.get('access_token');
-                        const refresh = fragment.get('refresh_token');
-                        const error = fragment.get('error_description') || fragment.get('error');
-
-                        if (error) {
-                            const u = new URL(window.location.href);
-                            u.hash = '';
-                            u.searchParams.set('google_oauth_error', error);
-                            window.location.replace(u.toString());
-                            return;
-                        }
-
-                        if (!access || !refresh) return;
-
-                        const current = new URL(window.location.href);
-                        current.hash = '';
-                        current.searchParams.set('access_token', access);
-                        current.searchParams.set('refresh_token', refresh);
-                        window.location.replace(current.toString());
-                    } catch (e) {
-                        console.error('RacharlaGPT Google callback bridge:', e);
-                    }
-                })();
-                </script>
-                """,
-                unsafe_allow_javascript=True,
-            )
-        else:
-            st.error("Google sign-in could not be started.")
+            # The global browser-session bridge handles OAuth fragments,
+            # token persistence, and browser refresh restoration.
 
         st.caption(
             "One click • Use your Google account • No RacharlaGPT password to remember"
@@ -1262,6 +1321,8 @@ if "auth_user" not in st.session_state or st.session_state.auth_user is None:
 
 
 auth_user = st.session_state.auth_user
+# Keep browser storage current so refresh-token rotation stays synchronized.
+sync_session_to_browser()
 
 def _rgpt_display_name(user):
     metadata = getattr(user, "user_metadata", None) or {}

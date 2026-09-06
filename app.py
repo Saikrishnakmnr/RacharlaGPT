@@ -3,6 +3,7 @@ import uuid
 import json
 import base64
 import io
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -12,7 +13,7 @@ import streamlit as st
 from groq import Groq, RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 
 
 # ============================================================
@@ -261,25 +262,123 @@ os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 
 
 # ============================================================
-# SUPABASE CLIENT
+# SUPABASE CLIENT + CROSS-SESSION PKCE VERIFIER STORAGE
 # ============================================================
 
+# Streamlit's st.link_button opens the OAuth URL in a new browser tab.
+# That new tab creates a new Streamlit session. Supabase PKCE normally stores
+# the verifier inside the Python client's local storage, so the callback
+# session would otherwise lose it.
+#
+# We solve only that narrow problem here:
+# - each OAuth attempt gets a unique flow ID;
+# - the short-lived PKCE verifier is stored process-wide under that flow ID;
+# - the normal Supabase session remains local to the Streamlit session;
+# - the verifier is deleted immediately after a successful/failed exchange.
+#
+# This requires a Supabase Python SDK version whose ClientOptions supports
+# custom storage. requirements pins supabase==2.31.0.
+
+PKCE_VERIFIER_STORE = {}
+PKCE_VERIFIER_LOCK = threading.Lock()
+PKCE_VERIFIER_TTL_SECONDS = 10 * 60
+
+
+class RacharlaGPTPKCEStorage:
+    """Local session storage plus a shared store only for PKCE verifiers."""
+
+    def __init__(self):
+        self.local = {}
+
+    @staticmethod
+    def _is_verifier_key(key: str) -> bool:
+        return key.endswith("-code-verifier")
+
+    @staticmethod
+    def _cleanup_expired():
+        now = datetime.now(timezone.utc).timestamp()
+        with PKCE_VERIFIER_LOCK:
+            expired = [
+                key
+                for key, item in PKCE_VERIFIER_STORE.items()
+                if now - item["created_at"] > PKCE_VERIFIER_TTL_SECONDS
+            ]
+            for key in expired:
+                PKCE_VERIFIER_STORE.pop(key, None)
+
+    def get_item(self, key: str):
+        if self._is_verifier_key(key):
+            self._cleanup_expired()
+            with PKCE_VERIFIER_LOCK:
+                item = PKCE_VERIFIER_STORE.get(key)
+                return item["value"] if item else None
+        return self.local.get(key)
+
+    def set_item(self, key: str, value: str):
+        if self._is_verifier_key(key):
+            self._cleanup_expired()
+            with PKCE_VERIFIER_LOCK:
+                PKCE_VERIFIER_STORE[key] = {
+                    "value": value,
+                    "created_at": datetime.now(timezone.utc).timestamp(),
+                }
+            return
+        self.local[key] = value
+
+    def remove_item(self, key: str):
+        if self._is_verifier_key(key):
+            with PKCE_VERIFIER_LOCK:
+                PKCE_VERIFIER_STORE.pop(key, None)
+            return
+        self.local.pop(key, None)
+
+
+oauth_flow_id = st.query_params.get("oauth_flow")
+
+if oauth_flow_id:
+    # The callback session reconstructs the exact storage key used by the
+    # session that started Google sign-in.
+    oauth_storage_key = f"racharlagpt-oauth-{oauth_flow_id}"
+else:
+    if "local_supabase_storage_key" not in st.session_state:
+        st.session_state.local_supabase_storage_key = (
+            f"racharlagpt-session-{uuid.uuid4().hex}"
+        )
+    oauth_storage_key = st.session_state.local_supabase_storage_key
+
+
 if "supabase_client" not in st.session_state:
-    # IMPORTANT:
-    # Do not pass ClientOptions here. Some Streamlit Cloud environments may
-    # install supabase-py 2.24.x, where ClientOptions has a known regression:
-    # client creation can fail with:
-    # AttributeError: 'ClientOptions' object has no attribute 'storage'
-    #
-    # The plain create_client() path uses the library defaults and works
-    # across the affected versions. Keep the same client in session state so
-    # the OAuth flow can continue when Streamlit returns from Google.
+    pkce_storage = RacharlaGPTPKCEStorage()
+
+    client_options = ClientOptions(
+        flow_type="pkce",
+        auto_refresh_token=True,
+        persist_session=True,
+        storage=pkce_storage,
+    )
+
     st.session_state.supabase_client = create_client(
         SUPABASE_URL,
         SUPABASE_KEY,
+        options=client_options,
     )
 
+    # Give this Supabase auth client the same storage key for the entire
+    # OAuth flow. A new Streamlit callback session uses the same key because
+    # oauth_flow is returned in the redirect URL.
+    try:
+        st.session_state.supabase_client.auth._storage_key = oauth_storage_key
+    except Exception:
+        pass
+
 supabase: Client = st.session_state.supabase_client
+
+# If a new OAuth callback session was created, ensure its auth client uses
+# the flow-specific storage key before the PKCE exchange.
+try:
+    supabase.auth._storage_key = oauth_storage_key
+except Exception:
+    pass
 
 
 # ============================================================
@@ -738,11 +837,15 @@ def restore_session():
     access_token = params.get("access_token")
     refresh_token = params.get("refresh_token")
     code = params.get("code")
+    oauth_flow = params.get("oauth_flow")
 
-    # Google/Supabase PKCE callback. The same Supabase client must be used
-    # here as the one that created the OAuth URL so its code verifier remains
-    # available for the one-time code exchange.
-    if code:
+    # Google/Supabase PKCE callback.
+    #
+    # The callback may run in a new Streamlit session because the native link
+    # button opens a new tab. The flow-specific storage key above lets this
+    # session retrieve the short-lived verifier created by the original
+    # session.
+    if code and oauth_flow:
         try:
             res = supabase.auth.exchange_code_for_session({"auth_code": code})
             if res.user and res.session:
@@ -750,6 +853,7 @@ def restore_session():
                 st.query_params["access_token"] = res.session.access_token
                 st.query_params["refresh_token"] = res.session.refresh_token
                 st.query_params.pop("code", None)
+                st.query_params.pop("oauth_flow", None)
                 st.query_params.pop("logged_out", None)
                 st.session_state.pop("google_oauth_error", None)
                 st.session_state.pop("google_oauth_url", None)
@@ -911,53 +1015,63 @@ def show_auth():
         # ----------------------------------------------------
         # ONE-CLICK GOOGLE / GMAIL SIGN-IN
         # ----------------------------------------------------
-        # Streamlit renders custom HTML inside its app frame. The previous
-        # version tried to navigate with JavaScript, but the browser can block
-        # that navigation from the embedded frame.
+        # The native Streamlit link button opens Google in a new tab.
+        # Therefore the PKCE verifier must survive the new Streamlit session.
         #
-        # Instead, create the Supabase OAuth URL once and use Streamlit's
-        # native link button. It opens the OAuth URL in a real browser tab,
-        # avoiding unreliable custom HTML/iframe navigation.
-        # The URL is stored in session state so we do not recreate the PKCE
-        # flow on every Streamlit rerun.
-        if "google_oauth_url" not in st.session_state:
-            try:
-                oauth_response = supabase.auth.sign_in_with_oauth(
-                    {
-                        "provider": "google",
-                        "options": {
-                            "redirect_to": APP_URL,
-                        },
-                    }
-                )
-
-                google_oauth_url = getattr(oauth_response, "url", None)
-
-                if not google_oauth_url:
-                    raise RuntimeError(
-                        "Supabase did not return a Google OAuth authorization URL."
-                    )
-
-                st.session_state.google_oauth_url = google_oauth_url
-
-            except Exception as exc:
-                st.session_state.google_oauth_error = str(exc)
-
-        google_oauth_url = st.session_state.get("google_oauth_url")
-
-        if google_oauth_url:
-            # Use Streamlit's native link button for the OAuth URL.
-            # This is more reliable than injecting an HTML <a> tag inside
-            # Streamlit's app frame. Streamlit opens the OAuth URL in a real
-            # browser tab, which is supported by the official widget.
-            st.link_button(
+        # First create a unique flow ID and put it in the redirect URL.
+        # The Supabase client uses that same flow ID to select its temporary
+        # verifier storage.
+        if "oauth_flow" not in st.query_params:
+            if st.button(
                 "🔵  Continue with Google (Gmail)",
-                google_oauth_url,
                 use_container_width=True,
                 type="primary",
-            )
+            ):
+                new_flow_id = uuid.uuid4().hex
+                st.query_params["oauth_flow"] = new_flow_id
+                st.session_state.pop("google_oauth_url", None)
+                st.session_state.pop("google_oauth_error", None)
+                st.rerun()
         else:
-            st.error("Google sign-in could not be started.")
+            if "google_oauth_url" not in st.session_state:
+                try:
+                    flow_id = st.query_params.get("oauth_flow")
+                    redirect_with_flow = (
+                        f"{APP_URL}?oauth_flow={flow_id}"
+                    )
+
+                    oauth_response = supabase.auth.sign_in_with_oauth(
+                        {
+                            "provider": "google",
+                            "options": {
+                                "redirect_to": redirect_with_flow,
+                            },
+                        }
+                    )
+
+                    google_oauth_url = getattr(oauth_response, "url", None)
+
+                    if not google_oauth_url:
+                        raise RuntimeError(
+                            "Supabase did not return a Google OAuth authorization URL."
+                        )
+
+                    st.session_state.google_oauth_url = google_oauth_url
+
+                except Exception as exc:
+                    st.session_state.google_oauth_error = str(exc)
+
+            google_oauth_url = st.session_state.get("google_oauth_url")
+
+            if google_oauth_url:
+                st.link_button(
+                    "🔵  Continue with Google (Gmail)",
+                    google_oauth_url,
+                    use_container_width=True,
+                    type="primary",
+                )
+            else:
+                st.error("Google sign-in could not be started.")
 
         st.caption(
             "One click • Use your Google account • No RacharlaGPT password to remember"
@@ -973,6 +1087,7 @@ def show_auth():
             if st.button("🔄 Try Google sign-in again", use_container_width=True):
                 st.session_state.pop("google_oauth_error", None)
                 st.session_state.pop("google_oauth_url", None)
+                st.query_params.pop("oauth_flow", None)
                 st.rerun()
 
         st.markdown('<div class="divider-container">OR OTHER SIGN-IN OPTIONS</div>', unsafe_allow_html=True)

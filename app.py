@@ -915,9 +915,9 @@ def show_auth():
         # version tried to navigate with JavaScript, but the browser can block
         # that navigation from the embedded frame.
         #
-        # Instead, create the Supabase OAuth URL once and use a real HTML
-        # link with target="_top". Clicking it performs a normal top-level
-        # browser navigation to Google, which is the correct OAuth behavior.
+        # Instead, create the Supabase OAuth URL once and use Streamlit's
+        # native link button. It opens the OAuth URL in a real browser tab,
+        # avoiding unreliable custom HTML/iframe navigation.
         # The URL is stored in session state so we do not recreate the PKCE
         # flow on every Streamlit rerun.
         if "google_oauth_url" not in st.session_state:
@@ -946,19 +946,15 @@ def show_auth():
         google_oauth_url = st.session_state.get("google_oauth_url")
 
         if google_oauth_url:
-            safe_oauth_url = escape(google_oauth_url, quote=True)
-            st.markdown(
-                f"""
-                <a href="{safe_oauth_url}" target="_top" rel="noopener noreferrer"
-                   style="display:flex;align-items:center;justify-content:center;
-                          width:100%;box-sizing:border-box;padding:0.58rem 1rem;
-                          border-radius:0.5rem;background:#ff4b4b;color:white;
-                          text-decoration:none;font-weight:600;font-size:1rem;
-                          border:1px solid #ff4b4b;cursor:pointer;">
-                    🔵&nbsp;&nbsp;Continue with Google (Gmail)
-                </a>
-                """,
-                unsafe_allow_html=True,
+            # Use Streamlit's native link button for the OAuth URL.
+            # This is more reliable than injecting an HTML <a> tag inside
+            # Streamlit's app frame. Streamlit opens the OAuth URL in a real
+            # browser tab, which is supported by the official widget.
+            st.link_button(
+                "🔵  Continue with Google (Gmail)",
+                google_oauth_url,
+                use_container_width=True,
+                type="primary",
             )
         else:
             st.error("Google sign-in could not be started.")

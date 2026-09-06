@@ -1,8 +1,11 @@
 streamlit
-langchain
-langchain-core
-langchain-groq
 groq
+langchain-groq
+langchain-core
 supabase
-streamlit-cookies-controller==0.0.4
+pypdf
+python-docx
+openpyxl
+Pillow
+
 

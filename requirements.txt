@@ -2,10 +2,11 @@ streamlit
 groq
 langchain-groq
 langchain-core
-supabase
+supabase==2.31.0
 pypdf
 python-docx
 openpyxl
 Pillow
+
 
 

@@ -19,6 +19,7 @@ from groq import Groq, RateLimitError
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from supabase import create_client, Client
+from supabase.client import ClientOptions
 
 
 # ============================================================
@@ -298,14 +299,11 @@ def _derive_google_pkce_verifier(state):
 
 
 def _create_google_pkce():
-    """Create a PKCE challenge with the verifier carried by OAuth state."""
-    # The verifier is itself a cryptographically random PKCE-safe value.
-    # Sending it as OAuth state lets the callback recover the exact verifier
-    # without Streamlit session state, cookies, or process-local storage.
-    verifier = secrets.token_urlsafe(64)
+    """Create a state-bound PKCE challenge without storing verifier state."""
+    state = secrets.token_urlsafe(32)
+    verifier = _derive_google_pkce_verifier(state)
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    state = verifier
     return challenge, state
 
 
@@ -315,6 +313,9 @@ if "supabase_client" not in st.session_state:
     st.session_state.supabase_client = create_client(
         SUPABASE_URL,
         SUPABASE_KEY,
+        options=ClientOptions(
+            flow_type="implicit",
+        ),
     )
 
 supabase: Client = st.session_state.supabase_client
@@ -765,7 +766,7 @@ st.markdown(
 # ============================================================
 
 def restore_session():
-    """Restore an existing session or complete the Google OAuth PKCE callback."""
+    """Restore a Supabase session from query parameters."""
     if "auth_user" in st.session_state and st.session_state.auth_user:
         return
 
@@ -775,88 +776,14 @@ def restore_session():
 
     access_token = params.get("access_token")
     refresh_token = params.get("refresh_token")
-    code = params.get("code")
+    browser_oauth_error = params.get("google_oauth_error")
+    if browser_oauth_error:
+        st.session_state.google_oauth_error = browser_oauth_error
+        st.query_params.pop("google_oauth_error", None)
 
-    # Google/Supabase PKCE callback. The verifier is derived from the returned
-    # OAuth state, so it survives the new Streamlit session created by the
-    # Google link button and also survives an app process restart.
-    if code:
-        state = params.get("state")
-        try:
-            if not state:
-                raise ValueError("Google OAuth callback did not include the secure state parameter.")
-            # In the current flow, state is the PKCE verifier itself.
-            # Keep the strict length check required by PKCE.
-            verifier = state
-            if not (43 <= len(verifier) <= 128):
-                raise ValueError("Google OAuth returned an invalid PKCE state value.")
-        except Exception as exc:
-            st.session_state.google_oauth_error = str(exc)
-        else:
-            token_data = None
-            last_error = None
-            try:
-                token_url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/token?grant_type=pkce"
-                token_response = requests.post(
-                    token_url,
-                    headers={
-                        "apikey": SUPABASE_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "auth_code": code,
-                        "code_verifier": verifier,
-                    },
-                    timeout=20,
-                )
-
-                if token_response.ok:
-                    token_data = token_response.json()
-                else:
-                    try:
-                        last_error = token_response.json()
-                    except Exception:
-                        last_error = token_response.text
-            except Exception as exc:
-                last_error = str(exc)
-
-            if not token_data:
-                st.session_state.google_oauth_error = (
-                    f"Supabase PKCE exchange failed: {last_error}"
-                )
-            else:
-                access_token = token_data.get("access_token")
-                refresh_token = token_data.get("refresh_token")
-
-                try:
-                    if not access_token or not refresh_token:
-                        raise RuntimeError(
-                            "Supabase returned an incomplete Google session."
-                        )
-
-                    res = supabase.auth.set_session(access_token, refresh_token)
-                    if not res.user:
-                        raise RuntimeError(
-                            "Google session was exchanged, but Supabase did not return a user."
-                        )
-
-                    st.session_state.auth_user = res.user
-                    st.query_params["access_token"] = access_token
-                    st.query_params["refresh_token"] = refresh_token
-                    st.query_params.pop("code", None)
-                    st.query_params.pop("state", None)
-                    st.query_params.pop("logged_out", None)
-                    st.session_state.pop("google_oauth_error", None)
-                    st.session_state.pop("google_oauth_url", None)
-                    st.session_state.pop("google_oauth_state", None)
-                    st.rerun()
-                    return
-                except Exception as exc:
-                    st.session_state.google_oauth_error = str(exc)
-
-
-    # Restore via access/refresh tokens (used by email/password login and
-    # by callbacks that return tokens directly).
+    # Google implicit-flow callback is handled in the browser first.
+    # The browser bridge converts the URL fragment into query parameters,
+    # because URL fragments are intentionally never sent to Streamlit's server.
     if access_token and refresh_token:
         try:
             res = supabase.auth.set_session(access_token, refresh_token)
@@ -864,10 +791,12 @@ def restore_session():
                 st.session_state.auth_user = res.user
                 st.query_params.pop("logged_out", None)
                 return
+            raise RuntimeError("Supabase returned no user for the Google session.")
         except Exception as exc:
-            st.session_state.google_oauth_error = str(exc)
+            st.session_state.google_oauth_error = (
+                f"Google session could not be restored: {exc}"
+            )
 
-    # Fallback to any session already held by the Supabase client.
     try:
         session = supabase.auth.get_session()
         if session and session.user:
@@ -1008,52 +937,94 @@ def show_auth():
         # ----------------------------------------------------
         # ONE-CLICK GOOGLE / GMAIL SIGN-IN
         # ----------------------------------------------------
-        # Start one explicit PKCE flow and use a native Streamlit link button
-        # so Google opens in a real browser tab. The verifier is derived from
-        # the returned OAuth state, so it does not depend on the Streamlit
-        # session surviving the Google round trip.
+        # Use Supabase's browser/client-style implicit OAuth flow here.
+        # Supabase returns access/refresh tokens in the browser URL fragment.
+        # The bridge below moves them into query parameters so Streamlit can
+        # establish the authenticated server session.
         if "google_oauth_url" not in st.session_state:
             try:
-                challenge, state = _create_google_pkce()
-                st.session_state.google_oauth_state = state
-
-                query = urlencode(
+                oauth_response = supabase.auth.sign_in_with_oauth(
                     {
                         "provider": "google",
-                        "redirect_to": APP_URL,
-                        "code_challenge": challenge,
-                        "code_challenge_method": "s256",
-                        "state": state,
+                        "options": {
+                            "redirect_to": APP_URL,
+                        },
                     }
                 )
-                google_oauth_url = (
-                    f"{SUPABASE_URL.rstrip('/')}/auth/v1/authorize?{query}"
-                )
-                st.session_state.google_oauth_url = google_oauth_url
+                oauth_url = getattr(oauth_response, "url", None)
+                if not oauth_url:
+                    raise RuntimeError("Supabase did not return a Google OAuth URL.")
+                st.session_state.google_oauth_url = oauth_url
             except Exception as exc:
                 st.session_state.google_oauth_error = str(exc)
 
         google_oauth_url = st.session_state.get("google_oauth_url")
 
         if google_oauth_url:
-            # IMPORTANT: st.link_button always opens a new browser tab/new
-            # Streamlit session. For OAuth, keep the round trip in the same
-            # browser tab so the callback returns directly to this app.
-            # st.html is not iframed, so this anchor performs a normal same-tab
-            # browser navigation to Google.
             safe_google_url = escape(google_oauth_url, quote=True)
-            st.html(
+            st.markdown(
                 f"""
-                <a href=\"{safe_google_url}\" target=\"_self\"
-                   style=\"display:flex;align-items:center;justify-content:center;
-                          width:100%;min-height:43px;box-sizing:border-box;
-                          border-radius:10px;background:#ff4b4b;color:white;
-                          text-decoration:none;font-weight:700;font-size:16px;
-                          font-family:inherit;cursor:pointer;"
-                   aria-label=\"Continue with Google (Gmail)\">
-                    🔵&nbsp;&nbsp;Continue with Google (Gmail)
+                <a href="{safe_google_url}" target="_self" rel="noopener"
+                   style="
+                     display:flex;
+                     align-items:center;
+                     justify-content:center;
+                     width:100%;
+                     min-height:46px;
+                     box-sizing:border-box;
+                     border-radius:10px;
+                     text-decoration:none;
+                     font-weight:600;
+                     font-size:15px;
+                     color:white;
+                     background:#2f6fed;
+                     border:1px solid #2f6fed;
+                     margin:6px 0 8px 0;
+                   ">
+                   🔵&nbsp;&nbsp;Continue with Google (Gmail)
                 </a>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Supabase implicit OAuth returns the session in the browser URL
+            # fragment. Fragments are not sent to Streamlit's Python server.
+            # Streamlit 1.56+ can execute this small trusted callback bridge.
+            st.html(
                 """
+                <script>
+                (function () {
+                    try {
+                        const hash = window.location.hash;
+                        if (!hash || hash.length < 2) return;
+
+                        const fragment = new URLSearchParams(hash.substring(1));
+                        const access = fragment.get('access_token');
+                        const refresh = fragment.get('refresh_token');
+                        const error = fragment.get('error_description') || fragment.get('error');
+
+                        if (error) {
+                            const u = new URL(window.location.href);
+                            u.hash = '';
+                            u.searchParams.set('google_oauth_error', error);
+                            window.location.replace(u.toString());
+                            return;
+                        }
+
+                        if (!access || !refresh) return;
+
+                        const current = new URL(window.location.href);
+                        current.hash = '';
+                        current.searchParams.set('access_token', access);
+                        current.searchParams.set('refresh_token', refresh);
+                        window.location.replace(current.toString());
+                    } catch (e) {
+                        console.error('RacharlaGPT Google callback bridge:', e);
+                    }
+                })();
+                </script>
+                """,
+                unsafe_allow_javascript=True,
             )
         else:
             st.error("Google sign-in could not be started.")

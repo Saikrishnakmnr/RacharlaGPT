@@ -1055,30 +1055,14 @@ def show_auth():
         google_oauth_url = st.session_state.get("google_oauth_url")
 
         if google_oauth_url:
-            safe_google_url = escape(google_oauth_url, quote=True)
-            st.markdown(
-                f"""
-                <a href="{safe_google_url}" target="_self" rel="noopener"
-                   style="
-                     display:flex;
-                     align-items:center;
-                     justify-content:center;
-                     width:100%;
-                     min-height:46px;
-                     box-sizing:border-box;
-                     border-radius:10px;
-                     text-decoration:none;
-                     font-weight:600;
-                     font-size:15px;
-                     color:white;
-                     background:#2f6fed;
-                     border:1px solid #2f6fed;
-                     margin:6px 0 8px 0;
-                   ">
-                   🔵&nbsp;&nbsp;Continue with Google (Gmail)
-                </a>
-                """,
-                unsafe_allow_html=True,
+            # Use Streamlit's native link button instead of an HTML anchor.
+            # This makes the entire visible button reliably clickable while
+            # preserving the exact same Supabase OAuth URL and flow.
+            st.link_button(
+                "🔵 Continue with Google (Gmail)",
+                google_oauth_url,
+                use_container_width=True,
+                type="primary",
             )
 
             # The global browser-session bridge handles OAuth fragments,
